@@ -1,0 +1,6 @@
+{
+  "/api/progress/route": "app/api/progress/route.js",
+  "/work/page": "app/work/page.js",
+  "/api/quiz/answer/route": "app/api/quiz/answer/route.js",
+  "/api/mark-ran/route": "app/api/mark-ran/route.js"
+}
