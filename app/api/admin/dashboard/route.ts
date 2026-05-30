@@ -17,13 +17,16 @@ export async function GET(req: Request) {
       pool.query('SELECT COUNT(*) AS n FROM users'),
       pool.query("SELECT COUNT(*) AS n FROM slip_uploads WHERE status = 'pending'"),
       pool.query("SELECT COALESCE(SUM(amount), 0) AS n FROM transactions WHERE type = 'topup'"),
-      pool.query("SELECT COUNT(*) AS n FROM paid_tasks WHERE DATE(created_at) = CURRENT_DATE"),
+      pool.query("SELECT COUNT(*) AS n FROM paid_tasks WHERE DATE(paid_at) = CURRENT_DATE"),
       pool.query('SELECT COUNT(*) AS n FROM paid_tasks WHERE ran_at IS NULL'),
       pool.query(`
-        SELECT DATE(created_at) AS date, SUM(amount) AS total
+        SELECT
+          TO_CHAR(DATE(created_at AT TIME ZONE 'Asia/Bangkok'), 'YYYY-MM-DD') AS date,
+          SUM(amount) AS total
         FROM transactions
-        WHERE type = 'topup' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
-        GROUP BY DATE(created_at)
+        WHERE type = 'topup'
+          AND created_at >= NOW() - INTERVAL '6 days'
+        GROUP BY DATE(created_at AT TIME ZONE 'Asia/Bangkok')
         ORDER BY date ASC
       `),
       pool.query(`
@@ -34,15 +37,15 @@ export async function GET(req: Request) {
       `),
     ]);
 
-    // Fill gaps so every day in last 7 has a value
+    // Fill gaps so every day in last 7 has a value (Bangkok timezone)
     const last7 = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
+      const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
       d.setDate(d.getDate() - (6 - i));
       return d.toISOString().slice(0, 10);
     });
     const chartMap: Record<string, number> = {};
     (chartRows as { date: string; total: string }[]).forEach(r => {
-      chartMap[String(r.date).slice(0, 10)] = Number(r.total);
+      chartMap[r.date] = Number(r.total);
     });
 
     return Response.json({
@@ -56,7 +59,8 @@ export async function GET(req: Request) {
       revenue_chart: last7.map(date => ({ date, total: chartMap[date] ?? 0 })),
       recent_transactions: recentTxs,
     });
-  } catch {
-    return Response.json({ error: 'db_error' }, { status: 500 });
+  } catch (err) {
+    console.error('[dashboard] error:', err);
+    return Response.json({ error: 'db_error', detail: String(err) }, { status: 500 });
   }
 }
