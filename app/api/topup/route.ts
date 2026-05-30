@@ -23,6 +23,10 @@ export async function POST(req: Request) {
     const buffer = await slipFile.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
     console.log('[topup] base64 length:', base64.length);
+    console.log('[topup] base64 prefix:', base64.substring(0, 100));
+    console.log('[topup] starts with data:image?', base64.startsWith('data:image'));
+    console.log('[topup] starts with /9j/ (JPEG)?', base64.startsWith('/9j/'));
+    console.log('[topup] starts with iVBORw (PNG)?', base64.startsWith('iVBORw'));
 
     console.log('[topup] calling SlipOK...');
     const result = await verifySlip(base64);
