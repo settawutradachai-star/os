@@ -412,7 +412,7 @@ export default function AdminPage() {
                         <Tooltip
                           contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                           formatter={(value) => [`฿${Number(value).toFixed(2)}`, 'รายได้']}
-                          labelFormatter={(label: string) => `วันที่ ${label}`}
+                          labelFormatter={(label) => `วันที่ ${label}`}
                         />
                         <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
                       </AreaChart>
