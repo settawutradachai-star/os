@@ -50,7 +50,7 @@ export default function TopupPage() {
         bank_name: res.bank_name || '—',
         account_no: res.account_no || '—',
         account_name: res.account_name || '—',
-        qr_image: res.qr_image || '',
+        qr_image: '/qrcode.jpg',
       });
     } catch (e) {
       console.warn('loadPaymentInfo error:', e);
