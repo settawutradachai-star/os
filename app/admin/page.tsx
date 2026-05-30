@@ -411,7 +411,7 @@ export default function AdminPage() {
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v: number) => `฿${v}`} />
                         <Tooltip
                           contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                          formatter={(value: number) => [`฿${value.toFixed(2)}`, 'รายได้']}
+                          formatter={(value) => [`฿${Number(value).toFixed(2)}`, 'รายได้']}
                           labelFormatter={(label: string) => `วันที่ ${label}`}
                         />
                         <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
