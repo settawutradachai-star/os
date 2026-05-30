@@ -13,20 +13,22 @@ export async function verifySlip(
   const url = `${endpoint}${branchId}`;
   console.log('[slipok] calling:', url);
 
-  const slipokPayload = { data: base64Image };
-  console.log('[slipok] full payload keys:', Object.keys(slipokPayload));
-  console.log('[slipok] base64 starts with data:image?', slipokPayload.data.startsWith('data:image'));
-  console.log('[slipok] base64 starts with /9j/ (JPEG)?', slipokPayload.data.startsWith('/9j/'));
-  console.log('[slipok] base64 first 50 chars:', slipokPayload.data.substring(0, 50));
+  const buffer = Buffer.from(base64Image, 'base64');
+  const blob   = new Blob([buffer], { type: 'image/jpeg' });
+  const formData = new FormData();
+  formData.append('files', blob, 'slip.jpg');
+  formData.append('log', 'true');
+
+  console.log('[slipok] sending as multipart/form-data, buffer size:', buffer.length);
   console.log('[slipok] headers:', { 'x-authorization': apiKey.substring(0, 5) + '...' });
 
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'x-authorization': apiKey,
-      'Content-Type': 'application/json',
+      // Content-Type intentionally omitted — fetch sets multipart boundary automatically
     },
-    body: JSON.stringify(slipokPayload),
+    body: formData,
   });
 
   console.log('[slipok] status:', res.status);
