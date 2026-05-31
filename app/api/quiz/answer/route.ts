@@ -14,34 +14,29 @@ export async function POST(req: Request) {
   if (!token || !itemid) return Response.json({ error: 'missing_parameters' }, { status: 400 });
 
   try {
-    // Step 1: fetch quiz questions (old endpoint, returns array with choices_show_answer)
+    // Step 1: fetch quiz questions (returns array with choices_show_answer)
     const quizUrl = `https://e-ed.e-tech.ac.th/api/quiz/${itemid}/answer?token=${token}`;
     const quizRes = await fetch(quizUrl);
 
     const ct = quizRes.headers.get('content-type') ?? '';
     if (!ct.includes('application/json')) {
-      console.warn('[quiz] non-JSON from quiz API. status:', quizRes.status, 'url:', quizUrl);
+      console.warn('[quiz] non-JSON from quiz API. status:', quizRes.status);
       return Response.json({ success: false, error: 'quiz_api_error', skipped: true });
     }
 
     const quizData = await quizRes.json();
-    console.log('[quiz raw]', JSON.stringify(quizData).slice(0, 300));
 
     if (!Array.isArray(quizData) || quizData.length === 0) {
-      console.warn('[quiz] no questions for item', itemid);
       return Response.json({ success: false, error: 'no_questions', skipped: true });
     }
 
-    // Step 2: build answers using PHP format — choices_show_answer where answer === 'Y'
+    // Step 2: build answers — choices_show_answer where answer === 'Y'
     const ans = quizData.map((q: any) => {
       const correct = q.choices_show_answer?.find((c: any) => c.answer === 'Y');
       return correct ? { quizid: q.quizid, quiz_type: q.quiz_type, ans: correct.no } : null;
     }).filter(Boolean);
 
-    console.log('[quiz] questions:', quizData.length, 'answers mapped:', ans.length);
-
     if (ans.length === 0) {
-      console.warn('[quiz] no correct answers found for item', itemid);
       return Response.json({ success: false, error: 'no_answers', skipped: true });
     }
 
@@ -67,9 +62,7 @@ export async function POST(req: Request) {
       return Response.json({ success: false, error: 'send_error', skipped: true });
     }
 
-    const sendData = await sendRes.json();
-    console.log('[quiz] result:', sendData);
-    return Response.json(sendData);
+    return Response.json(await sendRes.json());
   } catch (err) {
     console.error('[quiz] error for item', itemid, err);
     return Response.json({ success: false, error: 'exception', skipped: true });

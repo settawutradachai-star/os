@@ -10,28 +10,18 @@ export async function verifySlip(
     return { valid: false, amount: 0 };
   }
 
-  const url = `${endpoint}${branchId}`;
-  console.log('[slipok] calling:', url);
-
+  const url    = `${endpoint}${branchId}`;
   const buffer = Buffer.from(base64Image, 'base64');
   const blob   = new Blob([buffer], { type: 'image/jpeg' });
-  const formData = new FormData();
-  formData.append('files', blob, 'slip.jpg');
-  formData.append('log', 'true');
-
-  console.log('[slipok] sending as multipart/form-data, buffer size:', buffer.length);
-  console.log('[slipok] headers:', { 'x-authorization': apiKey.substring(0, 5) + '...' });
+  const form   = new FormData();
+  form.append('files', blob, 'slip.jpg');
+  form.append('log', 'true');
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'x-authorization': apiKey,
-      // Content-Type intentionally omitted — fetch sets multipart boundary automatically
-    },
-    body: formData,
+    headers: { 'x-authorization': apiKey },
+    body: form,
   });
-
-  console.log('[slipok] status:', res.status);
 
   const ct = res.headers.get('content-type') ?? '';
   if (!ct.includes('application/json')) {
@@ -41,7 +31,6 @@ export async function verifySlip(
   }
 
   const data = await res.json();
-  console.log('[slipok] response:', JSON.stringify(data));
 
   if (!data.success) {
     console.warn('[slipok] verification failed:', data.code, data.message);

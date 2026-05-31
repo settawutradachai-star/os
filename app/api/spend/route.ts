@@ -1,7 +1,7 @@
 import pool from '@/lib/db';
 
 export async function POST(req: Request) {
-  const { student_id, course_id, item_ids } = await req.json();
+  const { student_id, course_id, item_ids, reseller_student_id } = await req.json();
 
   if (!student_id || !Array.isArray(item_ids) || item_ids.length === 0) {
     return Response.json({ success: false, error: 'missing_parameters' }, { status: 400 });
@@ -14,13 +14,9 @@ export async function POST(req: Request) {
   try {
     await client.query('BEGIN');
 
-    // Fetch user role to determine which price applies
-    const { rows: roleRows } = await client.query(
-      'SELECT role FROM users WHERE student_id = $1',
-      [student_id]
-    );
-    const userRole = (roleRows[0] as { role: string } | undefined)?.role ?? 'user';
-    const priceKey = userRole === 'reseller' ? 'price_per_task_reseller' : 'price_per_task';
+    // Billing: if reseller_student_id provided, charge reseller at reseller price
+    const billing_id = reseller_student_id || student_id;
+    const priceKey   = reseller_student_id ? 'price_per_task_reseller' : 'price_per_task';
 
     const { rows: settingRows } = await client.query(
       'SELECT value FROM settings WHERE key_name = $1 LIMIT 1',
@@ -42,7 +38,7 @@ export async function POST(req: Request) {
     if (newItemIds.length > 0) {
       const { rows: userRows } = await client.query(
         'SELECT credit_balance FROM users WHERE student_id = $1',
-        [student_id]
+        [billing_id]
       );
 
       if (!userRows.length) {
@@ -65,7 +61,7 @@ export async function POST(req: Request) {
 
       await client.query(
         'UPDATE users SET credit_balance = credit_balance - $1 WHERE student_id = $2 AND credit_balance >= $3',
-        [totalCost, student_id, totalCost]
+        [totalCost, billing_id, totalCost]
       );
 
       for (const itemId of newItemIds) {
@@ -75,14 +71,17 @@ export async function POST(req: Request) {
         );
       }
 
+      const txDesc = reseller_student_id
+        ? `Auto: ${newItemIds.length} items (customer: ${student_id})`
+        : `Auto: ${newItemIds.length} items`;
       await client.query(
         "INSERT INTO transactions (student_id, type, amount, description, status) VALUES ($1, 'spend', $2, $3, 'completed')",
-        [student_id, totalCost, `Auto: ${newItemIds.length} items`]
+        [billing_id, totalCost, txDesc]
       );
     } else {
       const { rows: userRows } = await client.query(
         'SELECT credit_balance FROM users WHERE student_id = $1',
-        [student_id]
+        [billing_id]
       );
       currentBalance = Number((userRows[0] as { credit_balance: number } | undefined)?.credit_balance ?? 0);
     }

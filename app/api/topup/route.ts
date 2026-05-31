@@ -2,35 +2,19 @@ import pool from '@/lib/db';
 import { verifySlip } from '@/lib/slipok';
 
 export async function POST(req: Request) {
-  console.log('[topup] start');
   try {
     const formData = await req.formData();
     const student_id = formData.get('student_id')?.toString();
     const slipFile = formData.get('slip') as File | null;
 
-    console.log('[topup] student_id:', student_id);
-    console.log('[topup] slip file:', slipFile?.name, slipFile?.size, 'bytes');
-
     if (!student_id || !slipFile) {
-      console.warn('[topup] missing student_id or slip');
       return Response.json({ message: 'Missing student_id or slip' }, { status: 400 });
     }
 
-    console.log('[topup] SLIPOK_API_KEY:', process.env.SLIPOK_API_KEY ? 'SET' : 'MISSING');
-    console.log('[topup] SLIPOK_BRANCH_ID:', process.env.SLIPOK_BRANCH_ID ? 'SET' : 'MISSING');
-    console.log('[topup] SLIPOK_ENDPOINT:', process.env.SLIPOK_ENDPOINT ? 'SET' : 'MISSING');
-
     const buffer = await slipFile.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
-    console.log('[topup] base64 length:', base64.length);
-    console.log('[topup] base64 prefix:', base64.substring(0, 100));
-    console.log('[topup] starts with data:image?', base64.startsWith('data:image'));
-    console.log('[topup] starts with /9j/ (JPEG)?', base64.startsWith('/9j/'));
-    console.log('[topup] starts with iVBORw (PNG)?', base64.startsWith('iVBORw'));
 
-    console.log('[topup] calling SlipOK...');
     const result = await verifySlip(base64);
-    console.log('[topup] SlipOK result:', JSON.stringify(result));
 
     if (!result.valid) {
       return Response.json({
@@ -40,7 +24,6 @@ export async function POST(req: Request) {
     }
 
     const amount = result.amount;
-    console.log('[topup] verified amount:', amount, 'ref:', result.ref);
 
     const client = await pool.connect();
     try {
@@ -73,7 +56,6 @@ export async function POST(req: Request) {
         [student_id]
       );
       const newBalance = Number(rows[0]?.credit_balance ?? 0);
-      console.log('[topup] done — new balance for', student_id, ':', newBalance);
 
       return Response.json({
         status: 'approved',

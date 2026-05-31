@@ -48,6 +48,8 @@ export default function CoursesPage() {
   const [id_class, setId_class]   = useState<string | null>(null);
   const [subjects, setSubjects]   = useState<Subject[]>([]);
   const [creditBalance, setCreditBalance] = useState<number>(0);
+  const [userRole, setUserRole]     = useState<string>('user');
+  const [resellerId, setResellerId] = useState<string | null>(null);
 
   const [selectMode, setSelectMode]   = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -84,6 +86,10 @@ export default function CoursesPage() {
     setFull_name(fn);
     setId_class(idc);
     setSubjects(subs);
+    const role = localStorage.getItem('user_role') ?? 'user';
+    console.log('[courses] user_role from localStorage:', role);
+    setUserRole(role);
+    setResellerId(localStorage.getItem('reseller_id'));
     loadNavCredit(ic);
   }, [router]);
 
@@ -249,6 +255,7 @@ export default function CoursesPage() {
             task_count: newItems.length,
             course_id:  parseInt(courseId),
             item_ids:   newItems.map(i => i.itemid),
+            ...(resellerId ? { reseller_student_id: resellerId } : {}),
           }),
         }).then(r => r.json()).catch(() => ({ success: false }));
 
@@ -364,7 +371,7 @@ export default function CoursesPage() {
 
   return (
     <div className="bg-slate-50 min-h-screen">
-      {/* Running banner */}
+      {/* Running banner — fixed, intentionally covers nav while auto is active */}
       {isRunning && (
         <div className="fixed top-0 left-0 right-0 z-[100] bg-indigo-600 text-white text-xs font-medium px-4 py-2 flex items-center gap-2">
           <svg className="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
@@ -392,6 +399,15 @@ export default function CoursesPage() {
             <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl min-w-[60px] text-center">
               ฿{creditBalance.toFixed(2)}
             </span>
+            {userRole === 'reseller' && (
+              <a href="/reseller" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white transition flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                ทำงานให้ลูกค้า
+              </a>
+            )}
             <a href="/topup" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
@@ -408,6 +424,41 @@ export default function CoursesPage() {
           </div>
         </div>
       </nav>
+
+      {/* Reseller mode banner — sits in content flow, naturally below navbar */}
+      {resellerId && (
+        <div className="bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-between">
+          <span>โหมดตัวแทน — ลูกค้า: <strong>{id_code}</strong> · เรียกเก็บจาก: <strong>{resellerId}</strong></span>
+          <button
+            onClick={() => {
+              const resellerToken  = localStorage.getItem('reseller_token');
+              const resellerId     = localStorage.getItem('reseller_id');
+              const resellerOpenid = localStorage.getItem('reseller_openid');
+              const resellerRecid  = localStorage.getItem('reseller_recid');
+              const resellerName   = localStorage.getItem('reseller_name');
+
+              if (resellerToken)  localStorage.setItem('token',      resellerToken);
+              if (resellerId)     localStorage.setItem('student_id', resellerId);
+              if (resellerId)     localStorage.setItem('id_code',    resellerId);
+              if (resellerOpenid) localStorage.setItem('openid',     resellerOpenid);
+              if (resellerRecid)  localStorage.setItem('recid',      resellerRecid);
+              if (resellerName)   localStorage.setItem('full_name',  resellerName);
+
+              localStorage.removeItem('reseller_token');
+              localStorage.removeItem('reseller_id');
+              localStorage.removeItem('reseller_openid');
+              localStorage.removeItem('reseller_recid');
+              localStorage.removeItem('reseller_name');
+
+              setResellerId(null);
+              router.push('/reseller');
+            }}
+            className="text-white/80 hover:text-white underline text-xs ml-4 flex-shrink-0"
+          >
+            เปลี่ยนลูกค้า
+          </button>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto px-4 py-6">
         {/* Header row */}
@@ -470,7 +521,7 @@ export default function CoursesPage() {
         )}
 
         {/* Course grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {subjects.length === 0 ? (
             <div className="col-span-2 flex flex-col items-center gap-2 py-16 text-slate-400">
               <svg className="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">

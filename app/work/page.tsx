@@ -30,6 +30,7 @@ function WorkContent() {
   const name        = decodeURIComponent(params.get('name') ?? `วิชา #${courseId}`);
 
   const [token, setToken]               = useState<string | null>(null);
+  const [resellerId, setResellerId]     = useState<string | null>(null);
   const [chapters, setChapters]         = useState<Chapter[]>([]);
   const [loading, setLoading]           = useState(true);
   const [credit, setCredit]             = useState(0);
@@ -49,6 +50,7 @@ function WorkContent() {
     const t = localStorage.getItem('token');
     if (!t) { router.push('/login'); return; }
     setToken(t);
+    setResellerId(localStorage.getItem('reseller_id'));
     if (!courseId || !recid) { router.push('/courses'); return; }
     fetchChapters();
     loadCredit();
@@ -180,7 +182,9 @@ function WorkContent() {
         return;
       }
       setCredit(res.balance ?? 0);
-      setPricePerTask(res.price_per_task ?? 1);
+      // Use reseller price if in reseller mode
+      const isReseller = !!localStorage.getItem('reseller_id');
+      setPricePerTask(isReseller ? (res.price_per_task_reseller ?? 0.50) : (res.price_per_task ?? 1));
       setPaidItems(new Set((res.paid_items ?? []).map(String)));
     } catch {
       setCredit(0);
@@ -529,10 +533,11 @@ function WorkContent() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          student_id: studentId,
-          task_count: selectedItems.length,
-          course_id:  parseInt(courseId),
-          item_ids:   selectedItems,
+          student_id:           studentId,
+          task_count:           selectedItems.length,
+          course_id:            parseInt(courseId),
+          item_ids:             selectedItems,
+          ...(resellerId ? { reseller_student_id: resellerId } : {}),
         }),
       }).then(r => r.json());
 
@@ -717,19 +722,26 @@ function WorkContent() {
         </div>
       </nav>
 
+      {/* Reseller mode banner — normal flow, below navbar */}
+      {resellerId && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800">
+          โหมดตัวแทน — ทำงานให้ลูกค้า: <strong>{localStorage.getItem('id_code')}</strong> · เรียกเก็บจาก: <strong>{resellerId}</strong>
+        </div>
+      )}
+
       <div className="max-w-2xl mx-auto px-4 py-6">
         {/* Summary cards */}
         <div className="grid grid-cols-3 gap-3 mb-6 fade-in">
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 text-center card-hover">
-            <div className="text-xl font-bold text-slate-800">{summary.totalScore}/{summary.maxScore}</div>
+          <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 text-center card-hover">
+            <div className="text-base sm:text-xl font-bold text-slate-800">{summary.totalScore}/{summary.maxScore}</div>
             <div className="text-xs text-slate-400 mt-0.5">คะแนนรวม</div>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 text-center card-hover">
-            <div className="text-xl font-bold text-slate-800">{summary.doneTasks}/{summary.totalTasks}</div>
+          <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 text-center card-hover">
+            <div className="text-base sm:text-xl font-bold text-slate-800">{summary.doneTasks}/{summary.totalTasks}</div>
             <div className="text-xs text-slate-400 mt-0.5">ผ่านแล้ว</div>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 text-center card-hover">
-            <div className="text-xl font-bold text-slate-800">{summary.chapters}</div>
+          <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 text-center card-hover">
+            <div className="text-base sm:text-xl font-bold text-slate-800">{summary.chapters}</div>
             <div className="text-xs text-slate-400 mt-0.5">บทเรียน</div>
           </div>
         </div>
@@ -755,8 +767,8 @@ function WorkContent() {
 
         {/* Pay modal */}
         {showPayModal && (
-          <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4">
-            <div className="bg-white rounded-3xl w-full max-w-sm p-6 fade-in">
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center sm:p-4">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md p-6 fade-in">
               <h3 className="font-bold text-slate-800 text-lg mb-1">ยืนยันการชำระเงิน</h3>
               <p className="text-sm text-slate-500 mb-4">ระบบจะหักเครดิตและทำ Auto ให้อัตโนมัติ</p>
               <div className="bg-slate-50 rounded-2xl p-4 mb-4 space-y-2">
