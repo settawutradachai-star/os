@@ -689,36 +689,26 @@ function WorkContent() {
       )}
       {/* Top Nav */}
       <nav className="bg-white border-b border-slate-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <a href="/courses" className="flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-              </svg>
-              กลับ
-            </a>
-            <span className="text-slate-200">|</span>
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-              </div>
-              <span className="font-bold text-slate-800 text-sm truncate max-w-[180px] sm:max-w-xs">{name}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">ID: {courseId}</span>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl min-w-[60px] text-center">
-              ฿{credit.toFixed(2)}
-            </span>
-            <a href="/topup" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-              </svg>
-              เติมเงิน
-            </a>
-          </div>
+        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-2 w-full overflow-hidden">
+          {/* ← กลับ */}
+          <a href="/courses" className="flex items-center gap-1 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium flex-shrink-0">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+            </svg>
+            กลับ
+          </a>
+          {/* Course name — elastic, truncates before pushing right items off */}
+          <span className="truncate flex-1 min-w-0 text-sm font-semibold text-slate-800">{name}</span>
+          {/* Credit + top-up — fixed width, always visible */}
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl flex-shrink-0">
+            ฿{credit.toFixed(2)}
+          </span>
+          <a href="/topup" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition flex items-center gap-1 flex-shrink-0">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+            </svg>
+            เติมเงิน
+          </a>
         </div>
       </nav>
 

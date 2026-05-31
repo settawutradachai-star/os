@@ -62,7 +62,12 @@ export default function LoginPage() {
       localStorage.setItem("year", th_year);
       localStorage.setItem("term", term);
       localStorage.setItem("id_code", id_code);
+      localStorage.setItem("student_id", id_code);
       localStorage.setItem("token", token);
+      localStorage.setItem("user_role", result.role ?? "user");
+      console.log('[login] role from API:', result.role, '| stored:', result.role ?? 'user');
+      localStorage.removeItem("reseller_id");
+      localStorage.removeItem("reseller_name");
 
       const coursesRes = await fetch(
         `/api/courses?year=${encodeURIComponent(th_year)}&term=${encodeURIComponent(term)}&id_code=${encodeURIComponent(id_code)}&token=${encodeURIComponent(token)}`,

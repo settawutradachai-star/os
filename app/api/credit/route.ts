@@ -6,12 +6,13 @@ export async function POST(req: Request) {
 
   try {
     const { rows: settingsRows } = await pool.query(
-      "SELECT key_name, value FROM settings WHERE key_name IN ('price_per_task','maintenance_mode')"
+      "SELECT key_name, value FROM settings WHERE key_name IN ('price_per_task','price_per_task_reseller','maintenance_mode')"
     );
     const cfg: Record<string, string> = {};
     (settingsRows as { key_name: string; value: string }[]).forEach(r => { cfg[r.key_name] = r.value; });
-    const maintenance  = cfg['maintenance_mode'] === '1';
-    const pricePerTask = parseFloat(cfg['price_per_task'] ?? '1') || 1;
+    const maintenance         = cfg['maintenance_mode'] === '1';
+    const pricePerTask        = parseFloat(cfg['price_per_task']          ?? '1')    || 1;
+    const pricePerTaskReseller = parseFloat(cfg['price_per_task_reseller'] ?? '0.50') || 0.50;
 
     await pool.query(
       'INSERT INTO users (student_id) VALUES ($1) ON CONFLICT DO NOTHING',
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
       [student_id]
     );
 
-    return Response.json({ balance, price_per_task: pricePerTask, paid_items: paidItems, maintenance, history });
+    return Response.json({ balance, price_per_task: pricePerTask, price_per_task_reseller: pricePerTaskReseller, paid_items: paidItems, maintenance, history });
 
   } catch (err) {
     console.error('[credit]', err);

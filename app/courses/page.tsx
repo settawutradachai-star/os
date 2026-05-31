@@ -87,7 +87,6 @@ export default function CoursesPage() {
     setId_class(idc);
     setSubjects(subs);
     const role = localStorage.getItem('user_role') ?? 'user';
-    console.log('[courses] user_role from localStorage:', role);
     setUserRole(role);
     setResellerId(localStorage.getItem('reseller_id'));
     loadNavCredit(ic);
@@ -521,7 +520,7 @@ export default function CoursesPage() {
         )}
 
         {/* Course grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {subjects.length === 0 ? (
             <div className="col-span-2 flex flex-col items-center gap-2 py-16 text-slate-400">
               <svg className="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
