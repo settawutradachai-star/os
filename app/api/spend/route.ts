@@ -14,8 +14,17 @@ export async function POST(req: Request) {
   try {
     await client.query('BEGIN');
 
+    // Fetch user role to determine which price applies
+    const { rows: roleRows } = await client.query(
+      'SELECT role FROM users WHERE student_id = $1',
+      [student_id]
+    );
+    const userRole = (roleRows[0] as { role: string } | undefined)?.role ?? 'user';
+    const priceKey = userRole === 'reseller' ? 'price_per_task_reseller' : 'price_per_task';
+
     const { rows: settingRows } = await client.query(
-      "SELECT value FROM settings WHERE key_name = 'price_per_task' LIMIT 1"
+      'SELECT value FROM settings WHERE key_name = $1 LIMIT 1',
+      [priceKey]
     );
     const pricePerTask = parseFloat((settingRows[0] as { value: string } | undefined)?.value ?? '1') || 1;
 

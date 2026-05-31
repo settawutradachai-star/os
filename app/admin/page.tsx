@@ -100,6 +100,7 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<Setting[]>([]);
   const [loading, setLoading] = useState(false);
   const [creditInputs, setCreditInputs] = useState<Record<string, string>>({});
+  const [userSearch, setUserSearch] = useState('');
 
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -218,8 +219,7 @@ export default function AdminPage() {
     doLoad('settings', token);
   }
 
-  async function toggleRole(student_id: string, currentRole: string) {
-    const role = currentRole === 'admin' ? 'user' : 'admin';
+  async function toggleRole(student_id: string, role: string) {
     await fetch('/api/admin/users', {
       method: 'PATCH',
       headers: hdr(token),
@@ -495,9 +495,18 @@ export default function AdminPage() {
           {tab === 'users' && (
             <div className="max-w-7xl mx-auto">
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-200">
-                  <h2 className="text-lg font-bold text-slate-800">จัดการผู้ใช้งาน</h2>
-                  <p className="text-sm text-slate-500 mt-1">ดูรายชื่อผู้ใช้ ยอดคงเหลือ และจัดการสิทธิ์</p>
+                <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">จัดการผู้ใช้งาน</h2>
+                    <p className="text-sm text-slate-500 mt-1">ดูรายชื่อผู้ใช้ ยอดคงเหลือ และจัดการสิทธิ์</p>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="ค้นหารหัสนักศึกษา..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="border border-slate-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full max-w-xs"
+                  />
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
@@ -509,9 +518,13 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {users.length === 0 ? (
-                        <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">ไม่มีข้อมูลผู้ใช้งาน</td></tr>
-                      ) : users.map((u) => (
+                      {(() => {
+                        const filteredUsers = users.filter(u => u.student_id.includes(userSearch.trim()));
+                        return filteredUsers.length === 0 ? (
+                          <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">
+                            {userSearch ? `ไม่พบ "${userSearch}"` : 'ไม่มีข้อมูลผู้ใช้งาน'}
+                          </td></tr>
+                        ) : filteredUsers.map((u) => (
                         <tr key={u.student_id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="px-6 py-4 font-medium text-slate-700">
                             <div className="flex items-center gap-3">
@@ -552,19 +565,36 @@ export default function AdminPage() {
                             {new Date(u.created_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', timeZone: TZ })}
                           </td>
                           <td className="px-6 py-4">
-                            <button
-                              onClick={() => toggleRole(u.student_id, u.role)}
-                              className={`text-xs px-3 py-1.5 rounded-lg transition-colors font-medium ${
-                                u.role === 'admin'
-                                  ? 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'
-                                  : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100'
-                              }`}
-                            >
-                              {u.role === 'admin' ? 'ถอดสิทธิ์ Admin' : 'แต่งตั้ง Admin'}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {u.role !== 'reseller' && (
+                                <button
+                                  onClick={() => toggleRole(u.student_id, 'reseller')}
+                                  className="text-xs px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100 transition-colors font-medium"
+                                >
+                                  Reseller
+                                </button>
+                              )}
+                              {u.role !== 'admin' && (
+                                <button
+                                  onClick={() => toggleRole(u.student_id, 'admin')}
+                                  className="text-xs px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 transition-colors font-medium"
+                                >
+                                  Admin
+                                </button>
+                              )}
+                              {u.role !== 'user' && (
+                                <button
+                                  onClick={() => toggleRole(u.student_id, 'user')}
+                                  className="text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors font-medium"
+                                >
+                                  ถอดสิทธิ์
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
-                      ))}
+                      ));
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -696,20 +726,22 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 const SETTING_LABELS: Record<string, string> = {
-  maintenance_mode:  'โหมดปิดปรับปรุง (Maintenance)',
-  price_per_task:    'ราคาต่อ Task (บาท)',
-  BANK_NAME:         'ชื่อธนาคาร (ตัวย่อ)',
-  BANK_ACCOUNT_NO:   'เลขบัญชีธนาคาร',
-  BANK_ACCOUNT_NAME: 'ชื่อบัญชี',
-  PRICE_PER_ITEM:    'ราคาต่อ Task (บาท)',
+  maintenance_mode:        'โหมดปิดปรับปรุง (Maintenance)',
+  price_per_task:          'ราคาต่อ Task (บาท)',
+  price_per_task_reseller: 'ราคาต่อ Task (ตัวแทนจำหน่าย)',
+  BANK_NAME:               'ชื่อธนาคาร (ตัวย่อ)',
+  BANK_ACCOUNT_NO:         'เลขบัญชีธนาคาร',
+  BANK_ACCOUNT_NAME:       'ชื่อบัญชี',
+  PRICE_PER_ITEM:          'ราคาต่อ Task (บาท)',
 };
 
 const SETTING_DESC: Record<string, string> = {
-  maintenance_mode:  'เปิดเพื่อปิดการใช้งานระบบชั่วคราว',
-  price_per_task:    'ราคาเครดิตที่หักเมื่อผู้ใช้สั่งรัน Task',
-  BANK_NAME:         'เช่น KBANK, SCB, KTB',
-  BANK_ACCOUNT_NO:   'ตัวเลขติดกัน ไม่มีขีด',
-  BANK_ACCOUNT_NAME: 'ชื่อ-นามสกุล หรือชื่อบริษัท',
+  maintenance_mode:        'เปิดเพื่อปิดการใช้งานระบบชั่วคราว',
+  price_per_task:          'ราคาเครดิตที่หักเมื่อผู้ใช้สั่งรัน Task',
+  price_per_task_reseller: 'ราคาสำหรับ reseller (ตัวแทนจำหน่าย)',
+  BANK_NAME:               'เช่น KBANK, SCB, KTB',
+  BANK_ACCOUNT_NO:         'ตัวเลขติดกัน ไม่มีขีด',
+  BANK_ACCOUNT_NAME:       'ชื่อ-นามสกุล หรือชื่อบริษัท',
 };
 
 function SettingRow({ setting, onSave }: { setting: Setting; onSave: (k: string, v: string) => void }) {

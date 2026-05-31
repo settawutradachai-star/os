@@ -36,7 +36,7 @@ export async function PATCH(req: Request) {
     }
 
     if (action === 'set_role') {
-      const safeRole = ['user', 'admin'].includes(role) ? role : 'user';
+      const safeRole = ['user', 'admin', 'reseller'].includes(role) ? role : 'user';
       await pool.query('UPDATE users SET role = $1 WHERE student_id = $2', [safeRole, student_id]);
       return Response.json({ success: true });
     }
