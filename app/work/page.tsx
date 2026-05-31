@@ -689,26 +689,32 @@ function WorkContent() {
       )}
       {/* Top Nav */}
       <nav className="bg-white border-b border-slate-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-2 w-full overflow-hidden">
-          {/* ← กลับ */}
-          <a href="/courses" className="flex items-center gap-1 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium flex-shrink-0">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-            </svg>
-            กลับ
-          </a>
-          {/* Course name — elastic, truncates before pushing right items off */}
-          <span className="truncate flex-1 min-w-0 text-sm font-semibold text-slate-800">{name}</span>
-          {/* Credit + top-up — fixed width, always visible */}
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl flex-shrink-0">
-            ฿{credit.toFixed(2)}
-          </span>
-          <a href="/topup" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition flex items-center gap-1 flex-shrink-0">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-            </svg>
-            เติมเงิน
-          </a>
+        <div className="max-w-2xl mx-auto px-4 h-14 flex justify-between items-center w-full overflow-hidden">
+
+          {/* Left side: back button + course name */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <a href="/courses" className="flex items-center gap-1 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium flex-shrink-0">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+              </svg>
+              กลับ
+            </a>
+            <span className="truncate text-sm font-semibold text-slate-800">{name}</span>
+          </div>
+
+          {/* Right side: credit + top-up */}
+          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl">
+              ฿{credit.toFixed(2)}
+            </span>
+            <a href="/topup" className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white transition flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+              </svg>
+              เติมเงิน
+            </a>
+          </div>
+
         </div>
       </nav>
 
