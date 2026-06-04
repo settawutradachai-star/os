@@ -210,6 +210,18 @@ export default function AdminPage() {
     doLoad('users', token);
   }
 
+  async function removeCredit(student_id: string) {
+    const amount = Number(creditInputs[student_id]);
+    if (!amount || amount <= 0) return;
+    await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: hdr(token),
+      body: JSON.stringify({ action: 'remove_credit', student_id, amount }),
+    });
+    setCreditInputs(prev => ({ ...prev, [student_id]: '' }));
+    doLoad('users', token);
+  }
+
   async function saveSetting(key: string, value: string) {
     await fetch('/api/admin/settings', {
       method: 'POST',
@@ -542,14 +554,21 @@ export default function AdminPage() {
                                 placeholder="0.00"
                                 value={creditInputs[u.student_id] || ''}
                                 onChange={(e) => setCreditInputs({ ...creditInputs, [u.student_id]: e.target.value })}
-                                className="w-24 border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                               />
                               <button
                                 onClick={() => addCredit(u.student_id)}
                                 disabled={!creditInputs[u.student_id] || Number(creditInputs[u.student_id]) <= 0}
-                                className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 text-white px-3 py-1.5 rounded-lg transition-colors font-medium text-xs shadow-sm shadow-emerald-500/20 disabled:shadow-none"
+                                className="bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium"
                               >
                                 เพิ่ม
+                              </button>
+                              <button
+                                onClick={() => removeCredit(u.student_id)}
+                                disabled={!creditInputs[u.student_id] || Number(creditInputs[u.student_id]) <= 0}
+                                className="bg-rose-500 hover:bg-rose-600 disabled:bg-slate-300 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                              >
+                                ลบ
                               </button>
                             </div>
                           </td>

@@ -35,6 +35,18 @@ export async function PATCH(req: Request) {
       return Response.json({ success: true });
     }
 
+    if (action === 'remove_credit') {
+      await pool.query(
+        'UPDATE users SET credit_balance = GREATEST(0, credit_balance - $1) WHERE student_id = $2',
+        [Number(amount), student_id]
+      );
+      await pool.query(
+        "INSERT INTO transactions (student_id, type, amount, description, status) VALUES ($1, 'spend', $2, 'Admin ลบเครดิต', 'completed')",
+        [student_id, Number(amount)]
+      );
+      return Response.json({ success: true });
+    }
+
     if (action === 'set_role') {
       const safeRole = ['user', 'admin', 'reseller'].includes(role) ? role : 'user';
       await pool.query('UPDATE users SET role = $1 WHERE student_id = $2', [safeRole, student_id]);
