@@ -45,6 +45,7 @@ function WorkContent() {
   const hasCleanedUp     = useRef(false);
   const [autoStatus, setAutoStatus]     = useState('');
   const [autoProgress, setAutoProgress] = useState({ done: 0, total: 0 });
+  const [resubmitMode, setResubmitMode] = useState(false);
 
   useEffect(() => {
     const t = localStorage.getItem('token');
@@ -427,8 +428,18 @@ function WorkContent() {
     src.forEach(ch => (ch.child || []).forEach(item => allItems.push(item)));
 
     const idSet = selectedIds ? new Set(selectedIds.map(String)) : null;
-    const mediaItems = allItems.filter(i => i.item_type === 'M' && (!idSet || idSet.has(String(i.itemid))) && !isItemDone(i));
-    const quizzes    = allItems.filter(i => i.item_type === 'Q' && (!idSet || idSet.has(String(i.itemid))) && !isItemDone(i));
+    const mediaItems = allItems.filter(i =>
+      i.item_type === 'M' && (!idSet || idSet.has(String(i.itemid))) && !isItemDone(i)
+    );
+    const quizzes = allItems.filter(i => {
+      if (i.item_type !== 'Q') return false;
+      if (idSet && !idSet.has(String(i.itemid))) return false;
+      if (resubmitMode) {
+        // Re-submit mode: include quizzes where score is not full
+        return Number(i.stu_score ?? 0) < Number(i.item_score ?? 10);
+      }
+      return !isItemDone(i);
+    });
     const total      = mediaItems.length + quizzes.length;
     let done = 0;
 
@@ -588,8 +599,13 @@ function WorkContent() {
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
+  const isResubmittableQuiz = (item: Item) =>
+    resubmitMode &&
+    item.item_type === 'Q' &&
+    Number(item.stu_score ?? 0) < Number(item.item_score ?? 10);
+
   const getItemActionHTML = (item: Item) => {
-    if (item.view_success === 'Y') {
+    if (item.view_success === 'Y' && !isResubmittableQuiz(item)) {
       return (
         <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -747,6 +763,14 @@ function WorkContent() {
           <div className="flex gap-2 mb-2">
             <button onClick={() => selectAll(true)} className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium transition">เลือกทั้งหมด</button>
             <button onClick={() => selectAll(false)} className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium transition">ยกเลิกทั้งหมด</button>
+            <button
+              onClick={() => setResubmitMode(m => !m)}
+              className={`px-3 py-2 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+                resubmitMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {resubmitMode ? '✓ ส่งซ้ำ Quiz' : 'ส่งซ้ำ Quiz'}
+            </button>
           </div>
           <button
             onClick={showPayModalFn}
