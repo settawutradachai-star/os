@@ -35,7 +35,7 @@
                     <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
                     </svg>
-                    <input id="std_id" type="text" placeholder="เช่น 6811677177130"
+                    <input id="std_id" type="text" placeholder="เช่น 6811........."
                         class="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white transition text-sm"/>
                 </div>
             </div>
@@ -97,8 +97,14 @@
         hideError();
         setLoading(true, "กำลังเข้าสู่ระบบ...");
 
-        fetch(`https://e-ed.e-tech.ac.th/api/login?username=${username}&password=${password}&app_type=browser`, {
-            method: "POST", body: "", redirect: "follow"
+        fetch('https://e-ed.e-tech.ac.th/api/login', {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            body: JSON.stringify({ username, password, app_type: "brownser" }),
+            redirect: "follow"
         })
         .then(res => res.json())
         .then(result => {
@@ -120,7 +126,10 @@
             setLoading(true, "กำลังโหลดข้อมูล...");
 
             return fetch(`https://e-ed.e-tech.ac.th/api/courses?year=${th_year}&term=${term}&id_code=${id_code}`, {
-                headers: { "Authorization": `Bearer ${token}` }
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
             });
         })
         .then(res => res.json())

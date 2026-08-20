@@ -55,6 +55,7 @@ export default function CoursesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [isRunning, setIsRunning]   = useState(false);
+  const [resubmitAllMode, setResubmitAllMode] = useState(false);
   const [autoStatus, setAutoStatus] = useState('');
 
   const [showAutoModal, setShowAutoModal]       = useState(false);
@@ -113,6 +114,59 @@ export default function CoursesPage() {
   }, [isRunning]);
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  /** Flatten /api/lessons response — item อาจมีหลายคลิปซ้อนใน child/children */
+  const normalizeLessonsList = (raw: unknown): Record<string, any>[] => {
+    const out: Record<string, any>[] = [];
+    const seen = new Set<string>();
+
+    const add = (entry: unknown) => {
+      if (!entry || typeof entry !== 'object') return;
+      const o = entry as Record<string, any>;
+      const id = o.lessonid != null ? String(o.lessonid) : null;
+
+      if (id && seen.has(id)) return;
+      if (o.lessonid != null || o.lesson_type != null) {
+        if (id) seen.add(id);
+        out.push(o);
+      }
+      for (const key of ['child', 'children', 'lessons'] as const) {
+        if (Array.isArray(o[key])) o[key].forEach(add);
+      }
+    };
+
+    if (Array.isArray(raw)) {
+      raw.forEach(add);
+    } else if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, any>;
+      if (Array.isArray(obj.data)) obj.data.forEach(add);
+      else if (Array.isArray(obj.lessons)) obj.lessons.forEach(add);
+      else add(obj);
+    }
+    return out;
+  };
+
+  /** VDO: ดึง duration จริง — ข้าม lesson.duration === 1 (placeholder ของ e-ed สำหรับ PDF) */
+  const parseVdoDurationSec = (lesson: Record<string, any>): number => {
+    const tryParse = (raw: unknown): number | null => {
+      if (raw == null || raw === '') return null;
+      if (typeof raw === 'string' && raw.includes(':')) {
+        const parts = raw.split(':').map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+      }
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+
+    for (const key of ['lenght_vdo', 'length_vdo', 'full_time'] as const) {
+      const parsed = tryParse(lesson[key]);
+      if (parsed != null && parsed > 1) return Math.round(parsed);
+    }
+    const dur = tryParse(lesson.duration);
+    if (dur != null && dur > 1) return Math.round(dur);
+    return 60;
+  };
 
   const isItemDone = (item: Item) =>
     item.view_success === 'Y' ||
@@ -366,6 +420,181 @@ export default function CoursesPage() {
     if (id_code) loadNavCredit(id_code);
   };
 
+  // ── Resubmit all selected courses (include done items) ────────────────────
+
+  const runResubmitAll = async () => {
+    const tok       = localStorage.getItem('token') ?? '';
+    const studentId = localStorage.getItem('id_code') ?? '';
+    const selected  = subjects.filter(s => selectedIds.has(String(s.course_id)));
+    if (selected.length === 0) return;
+
+    setResubmitAllMode(true);
+    setSelectMode(false);
+    setIsRunning(true);
+
+    const courses: CoursePreview[] = [];
+
+    for (const sub of selected) {
+      try {
+        let recid = sub.recid ?? '';
+        if (!recid) {
+          const reg = await fetch('/api/courses/register', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ token: tok, host_id: 1, open_id: sub.open_id, courseid: sub.course_id }),
+          }).then(r => r.json());
+          recid = reg.recid || reg.id || reg.open_recid || reg.data?.recid || '';
+        }
+        if (!recid) continue;
+
+        const [chaptersRaw, creditRes] = await Promise.all([
+          fetch(`/api/chapters?course_id=${sub.course_id}&recid=${recid}&token=${encodeURIComponent(tok)}`).then(r => r.json()),
+          fetch('/api/credit', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ student_id: studentId, course_id: parseInt(sub.course_id) }),
+          }).then(r => r.json()),
+        ]);
+
+        const paidItemIds: string[] = (creditRes.paid_items ?? []).map(String);
+        const chapters: Chapter[] = Array.isArray(chaptersRaw) ? chaptersRaw : [];
+        const allItems = chapters.flatMap(ch => ch.child || []);
+        const items    = allItems.filter(i => i.item_type === 'M' || i.item_type === 'Q');
+        const newItems = items.filter(i => !paidItemIds.includes(String(i.itemid)));
+
+        courses.push({ sub, recid, items, newItems, paidItemIds });
+      } catch {}
+    }
+
+    for (const { sub, recid, items, newItems } of courses) {
+      const courseId   = String(sub.course_id);
+      const openid     = sub.open_id;
+      const courseName = sub.name_th || sub.name_en || courseId;
+
+      if (newItems.length > 0) {
+        const spendRes = await fetch('/api/spend', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            student_id: studentId,
+            task_count: newItems.length,
+            course_id:  parseInt(courseId),
+            item_ids:   newItems.map(i => i.itemid),
+            ...(resellerId ? { reseller_student_id: resellerId } : {}),
+          }),
+        }).then(r => r.json()).catch(() => ({ success: false }));
+
+        if (!spendRes.success) {
+          setAutoStatus(`❌ ข้าม ${courseName} — ${spendRes.error === 'insufficient_credit' ? 'เครดิตไม่พอ' : 'เกิดข้อผิดพลาด'}`);
+          if (spendRes.balance != null) setCreditBalance(spendRes.balance);
+          await sleep(1000);
+          continue;
+        }
+        setCreditBalance(spendRes.new_balance ?? creditBalance);
+      }
+
+      const mediaItems = items.filter(i => i.item_type === 'M');
+      const quizzes    = items.filter(i => i.item_type === 'Q');
+      const total      = mediaItems.length + quizzes.length;
+      let done = 0;
+
+      for (const item of mediaItems) {
+        setAutoStatus(`กำลังส่งซ้ำ: ${courseName} (${done + 1}/${total})`);
+        try {
+          const raw = await fetch(
+            `/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`
+          ).then(r => r.json());
+          const lessons = normalizeLessonsList(raw);
+
+          if (lessons.length > 0) {
+            for (const lesson of lessons) {
+              const isPDF    = lesson.lesson_type === 'F';
+              const isVDO    = lesson.lesson_type === 'Y';
+              const duration = isVDO ? parseVdoDurationSec(lesson) : (Math.floor(Math.random() * 46) + 45);
+              await sleep(isPDF ? 1000 : 500);
+              await fetch('/api/progress', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  token: tok,
+                  recid: Number(recid), openid, student_id: studentId,
+                  itemid: lesson.itemid ?? item.itemid,
+                  lessonid: lesson.lessonid,
+                  lesson_type: lesson.lesson_type, item_type: 'M',
+                  courseid: Number(courseId), full_time: duration, view_time: duration, percent: 100,
+                }),
+              }).then(r => r.json()).catch(() => {});
+              await sleep(200);
+            }
+          } else {
+            const dur = Math.floor(Math.random() * 46) + 45;
+            await sleep(1000);
+            await fetch('/api/progress', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: tok,
+                recid: Number(recid), openid, student_id: studentId,
+                itemid: item.itemid, lessonid: item.lessonid || item.itemid,
+                lesson_type: item.lesson_type, item_type: 'M',
+                courseid: Number(courseId), full_time: dur, view_time: dur, percent: 100,
+              }),
+            }).then(r => r.json()).catch(() => {});
+          }
+        } catch {}
+        done++;
+        await sleep(200);
+      }
+
+      for (const item of quizzes) {
+        setAutoStatus(`กำลังส่งซ้ำ: ${courseName} (${done + 1}/${total})`);
+        try {
+          const result = await fetch('/api/quiz/answer', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: tok, itemid: item.itemid,
+              recid, openid, course_id: courseId, student_id: studentId,
+            }),
+          }).then(r => r.json());
+
+          if (!result.skipped) {
+            await fetch('/api/progress', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: tok,
+                recid: Number(recid), openid, student_id: studentId,
+                itemid: item.itemid, lessonid: '',
+                lesson_type: item.lesson_type || 'Post', item_type: 'Q',
+                courseid: Number(courseId), full_time: 0, view_time: 19, percent: 100,
+              }),
+            }).catch(() => {});
+          }
+        } catch {}
+        done++;
+        await sleep(200);
+      }
+
+      await fetch('/api/mark-ran', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          student_id: studentId,
+          course_id:  parseInt(courseId),
+          item_ids:   items.map(i => i.itemid),
+        }),
+      }).catch(() => {});
+
+      await sleep(500);
+    }
+
+    setResubmitAllMode(false);
+    setIsRunning(false);
+    setAutoStatus('✓ ส่งซ้ำทุกวิชาที่เลือกเสร็จแล้ว!');
+    if (id_code) loadNavCredit(id_code);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -509,6 +738,23 @@ export default function CoursesPage() {
                   </svg>
                   Auto {selectedIds.size} วิชาที่เลือก
                 </>
+              )}
+            </button>
+            <button
+              onClick={runResubmitAll}
+              disabled={selectedIds.size === 0 || isLoadingPreview || isRunning || resubmitAllMode}
+              className="text-xs font-bold px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-40 text-white transition flex items-center gap-1.5"
+            >
+              {resubmitAllMode ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3V4a10 10 0 100 20v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
+                  </svg>
+                  กำลังส่งซ้ำ...
+                </>
+              ) : (
+                <>🔄 ส่งซ้ำที่เลือก</>
               )}
             </button>
           </div>

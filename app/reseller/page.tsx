@@ -93,7 +93,7 @@ export default function ResellerPage() {
               <label className="block text-sm font-semibold text-slate-700 mb-2">รหัสนักศึกษาลูกค้า</label>
               <input
                 type="text"
-                placeholder="เช่น 6811677177130"
+                placeholder="เช่น 6811........."
                 value={custId}
                 onChange={e => setCustId(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && doLogin()}

@@ -211,7 +211,8 @@
         // ── Fetch ────────────────────────────────────────────────────
         fetch(`https://e-ed.e-tech.ac.th/api/course/${course_id}/v2Items?recid=${recid}`, {
                 headers: {
-                    "Authorization": `Bearer ${token}`
+                    "Authorization": `Bearer ${token}`,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
             })
             .then(res => res.json())
@@ -524,7 +525,8 @@
                 const lessons = await fetch(
                     `https://e-ed.e-tech.ac.th/api/item/${item.itemid}/lessons?recid=${recid}`, {
                         headers: {
-                            "Authorization": `Bearer ${token}`
+                            "Authorization": `Bearer ${token}`,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         }
                     }
                 ).then(r => r.json());
@@ -573,7 +575,8 @@
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
-                            "Authorization": `Bearer ${token}`
+                            "Authorization": `Bearer ${token}`,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         },
                         body: JSON.stringify({
                             recid: Number(recid),
@@ -724,7 +727,8 @@
                     const lessons = await fetch(
                         `https://e-ed.e-tech.ac.th/api/item/${item.itemid}/lessons?recid=${recid}`, {
                             headers: {
-                                "Authorization": `Bearer ${token}`
+                                "Authorization": `Bearer ${token}`,
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                             }
                         }
                     ).then(r => r.json());
@@ -754,7 +758,8 @@
                                 method: "POST",
                                 headers: {
                                     "Content-Type": "application/json",
-                                    "Authorization": `Bearer ${token}`
+                                    "Authorization": `Bearer ${token}`,
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                                 },
                                 body: JSON.stringify({
                                     recid: Number(recid),
@@ -784,7 +789,8 @@
                             method: "POST",
                             headers: {
                                 "Content-Type": "application/json",
-                                "Authorization": `Bearer ${token}`
+                                "Authorization": `Bearer ${token}`,
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                             },
                             body: JSON.stringify({
                                 recid: Number(recid),
@@ -819,9 +825,11 @@
             for (const item of quizzes) {
                 setStatus(`📝 Quiz: ${item.title}`);
                 try {
-                    const quizData = await fetch(
-                        `https://e-ed.e-tech.ac.th/api/quiz/${item.itemid}/answer?token=${token}`
-                    ).then(r => r.json());
+                    const quizData = await fetch(`https://e-ed.e-tech.ac.th/api/quiz/${item.itemid}/answer?token=${token}`, {
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
+                    }).then(r => r.json());
 
                     if (!Array.isArray(quizData) || quizData.length === 0) {
                         tick();
@@ -846,7 +854,8 @@
                         `https://e-ed.e-tech.ac.th/api/quiz/v2/${item.itemid}/sendAnswer?token=${token}`, {
                             method: "POST",
                             headers: {
-                                "Content-Type": "application/json"
+                                "Content-Type": "application/json",
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                             },
                             body: JSON.stringify({
                                 recid: Number(recid),
@@ -870,7 +879,8 @@
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
-                            "Authorization": `Bearer ${token}`
+                            "Authorization": `Bearer ${token}`,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         },
                         body: JSON.stringify({
                             recid: Number(recid),
@@ -921,7 +931,11 @@
             const openid = subjectData?.open_id;
 
             // Step 1: ดึงคำตอบที่ถูกต้อง
-            fetch(`https://e-ed.e-tech.ac.th/api/quiz/${item.itemid}/answer?token=${token}`)
+            fetch(`https://e-ed.e-tech.ac.th/api/quiz/${item.itemid}/answer?token=${token}`, {
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
+                    })
                 .then(res => res.json())
                 .then(quizzes => {
                     if (!Array.isArray(quizzes) || quizzes.length === 0) {
@@ -950,7 +964,8 @@
                     return fetch(`https://e-ed.e-tech.ac.th/api/quiz/v2/${item.itemid}/sendAnswer?token=${token}`, {
                         method: "POST",
                         headers: {
-                            "Content-Type": "application/json"
+                            "Content-Type": "application/json",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         },
                         body: JSON.stringify({
                             recid: Number(recid),
@@ -985,7 +1000,8 @@
                             method: "POST",
                             headers: {
                                 "Content-Type": "application/json",
-                                "Authorization": `Bearer ${token}`
+                                "Authorization": `Bearer ${token}`,
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                             },
                             body: JSON.stringify({
                                 recid: Number(recid),
