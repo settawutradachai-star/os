@@ -26,12 +26,20 @@ export async function POST(req: Request) {
     const balance = Number((users[0] as { credit_balance: number } | undefined)?.credit_balance ?? 0);
 
     let paidItems: string[] = [];
+    let everPaidItems: string[] = [];
     if (course_id) {
-      const { rows } = await pool.query(
-        'SELECT itemid FROM paid_tasks WHERE student_id = $1 AND course_id = $2 AND ran_at IS NULL',
-        [student_id, course_id]
-      );
-      paidItems = (rows as { itemid: string }[]).map(r => r.itemid);
+      const [{ rows: pendingRows }, { rows: everRows }] = await Promise.all([
+        pool.query(
+          'SELECT itemid FROM paid_tasks WHERE student_id = $1 AND course_id = $2 AND ran_at IS NULL',
+          [student_id, course_id]
+        ),
+        pool.query(
+          'SELECT itemid FROM paid_tasks WHERE student_id = $1 AND course_id = $2',
+          [student_id, course_id]
+        ),
+      ]);
+      paidItems = (pendingRows as { itemid: string }[]).map(r => String(r.itemid));
+      everPaidItems = (everRows as { itemid: string }[]).map(r => String(r.itemid));
     }
 
     const { rows: history } = await pool.query(
@@ -39,10 +47,18 @@ export async function POST(req: Request) {
       [student_id]
     );
 
-    return Response.json({ balance, price_per_task: pricePerTask, price_per_task_reseller: pricePerTaskReseller, paid_items: paidItems, maintenance, history });
+    return Response.json({
+      balance,
+      price_per_task: pricePerTask,
+      price_per_task_reseller: pricePerTaskReseller,
+      paid_items: paidItems,
+      ever_paid_items: everPaidItems,
+      maintenance,
+      history,
+    });
 
   } catch (err) {
     console.error('[credit]', err);
-    return Response.json({ balance: 0, price_per_task: 1, paid_items: [], maintenance: false, history: [] });
+    return Response.json({ balance: 0, price_per_task: 1, paid_items: [], ever_paid_items: [], maintenance: false, history: [] });
   }
 }

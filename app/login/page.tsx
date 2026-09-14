@@ -136,7 +136,7 @@ export default function LoginPage() {
                 <input
                   id="std_id"
                   type="text"
-                  placeholder="เช่น 6811677177130"
+                  placeholder="เช่น 6811........."
                   value={stdId}
                   onChange={(e) => setStdId(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white transition text-sm"

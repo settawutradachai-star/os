@@ -35,7 +35,8 @@ function WorkContent() {
   const [loading, setLoading]           = useState(true);
   const [credit, setCredit]             = useState(0);
   const [pricePerTask, setPricePerTask] = useState(1);
-  const [paidItems, setPaidItems]       = useState<Set<string | number>>(new Set());
+  const [paidItems, setPaidItems]           = useState<Set<string | number>>(new Set());
+  const [everPaidItems, setEverPaidItems]   = useState<Set<string>>(new Set());
   const [showPayModal, setShowPayModal] = useState(false);
   const [selectedItems, setSelectedItems] = useState<(string | number)[]>([]);
   const [openChapters, setOpenChapters] = useState<Record<number, boolean>>({});
@@ -109,6 +110,59 @@ function WorkContent() {
   }, [openChapters]);
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  /** Flatten /api/lessons response — item อาจมีหลายคลิปซ้อนใน child/children */
+  const normalizeLessonsList = (raw: unknown): Record<string, any>[] => {
+    const out: Record<string, any>[] = [];
+    const seen = new Set<string>();
+
+    const add = (entry: unknown) => {
+      if (!entry || typeof entry !== 'object') return;
+      const o = entry as Record<string, any>;
+      const id = o.lessonid != null ? String(o.lessonid) : null;
+
+      if (id && seen.has(id)) return;
+      if (o.lessonid != null || o.lesson_type != null) {
+        if (id) seen.add(id);
+        out.push(o);
+      }
+      for (const key of ['child', 'children', 'lessons'] as const) {
+        if (Array.isArray(o[key])) o[key].forEach(add);
+      }
+    };
+
+    if (Array.isArray(raw)) {
+      raw.forEach(add);
+    } else if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, any>;
+      if (Array.isArray(obj.data)) obj.data.forEach(add);
+      else if (Array.isArray(obj.lessons)) obj.lessons.forEach(add);
+      else add(obj);
+    }
+    return out;
+  };
+
+  /** VDO: ดึง duration จริง — ข้าม lesson.duration === 1 (placeholder ของ e-ed สำหรับ PDF) */
+  const parseVdoDurationSec = (lesson: Record<string, any>): number => {
+    const tryParse = (raw: unknown): number | null => {
+      if (raw == null || raw === '') return null;
+      if (typeof raw === 'string' && raw.includes(':')) {
+        const parts = raw.split(':').map(p => parseInt(p, 10)).filter(n => !Number.isNaN(n));
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+      }
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+
+    for (const key of ['lenght_vdo', 'length_vdo', 'full_time'] as const) {
+      const parsed = tryParse(lesson[key]);
+      if (parsed != null && parsed > 1) return Math.round(parsed);
+    }
+    const dur = tryParse(lesson.duration);
+    if (dur != null && dur > 1) return Math.round(dur);
+    return 60;
+  };
 
   const isItemDone = (item: Item) =>
     item.view_success === 'Y' ||
@@ -187,6 +241,7 @@ function WorkContent() {
       const isReseller = !!localStorage.getItem('reseller_id');
       setPricePerTask(isReseller ? (res.price_per_task_reseller ?? 0.50) : (res.price_per_task ?? 1));
       setPaidItems(new Set((res.paid_items ?? []).map(String)));
+      setEverPaidItems(new Set((res.ever_paid_items ?? []).map(String)));
     } catch {
       setCredit(0);
     }
@@ -245,19 +300,24 @@ function WorkContent() {
     const tok         = localStorage.getItem('token') ?? '';
 
     try {
-      const lessons = await fetch(`/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`).then(r => r.json());
+      const raw = await fetch(`/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`).then(r => r.json());
+      const lessons = normalizeLessonsList(raw);
 
-      if (!Array.isArray(lessons) || lessons.length === 0) {
+      if (lessons.length === 0) {
         showToast('โหลด lessons ไม่สำเร็จ', 'red');
         resetMediaBtn(btn, item);
         return;
       }
 
-      let lastResult = null;
+      let lastResult: Record<string, any> | null = null;
+      let sentCount = 0;
+
       for (const lesson of lessons) {
         const isPDF = lesson.lesson_type === 'F';
         const isVDO = lesson.lesson_type === 'Y';
-        const duration = isVDO ? (lesson.lenght_vdo || lesson.duration || 60) : (Math.floor(Math.random() * 46) + 45);
+        const duration = isVDO
+          ? parseVdoDurationSec(lesson)
+          : (Math.floor(Math.random() * 46) + 45);
         const waitSec  = isPDF ? Math.floor(Math.random() * 5) + 5 : 2;
 
         if (btn) {
@@ -270,33 +330,52 @@ function WorkContent() {
           await sleep(waitSec * 1000);
         }
 
+        console.log(duration);
+
         const res = await fetch('/api/progress', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             token: tok,
             recid: Number(recid), openid, student_id: studentId,
-            itemid: lesson.itemid, lessonid: lesson.lessonid,
+            itemid: lesson.itemid ?? item.itemid,
+            lessonid: lesson.lessonid,
             lesson_type: lesson.lesson_type, item_type: 'M',
-            courseid: Number(courseId), full_time: duration, view_time: duration, percent: 100,
+            courseid: Number(courseId),
+            full_time: duration,
+            view_time: duration,
+            percent: 100,
           }),
         }).then(r => r.json());
         lastResult = res;
+        sentCount++;
       }
 
-      const isComplete = lastResult?.complete === 'Y' || lastResult?.item_complete === 'Y';
+      const allClipsSent = sentCount === lessons.length;
+      const isComplete = allClipsSent && (lastResult?.complete === 'Y' || lastResult?.item_complete === 'Y');
 
-      setChapters(prev => prev.map(ch => ({
-        ...ch,
-        child: (ch.child || []).map(i => i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i),
-      })));
+      if (allClipsSent) {
+        setChapters(prev => prev.map(ch => ({
+          ...ch,
+          child: (ch.child || []).map(i => i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i),
+        })));
+      }
 
       if (isComplete) {
         showToast(`✓ Mark ครบ ${lessons.length} lesson แล้ว!`, 'emerald');
-        if (btn) btn.outerHTML = `<div class="flex items-center gap-1.5" id="mwrap-${item.itemid}"><span class="text-xs font-semibold text-emerald-600 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ครบแล้ว</span></div>`;
-      } else {
+        if (btn) {
+          if (resubmitMode && item.view_success === 'Y') {
+            resetMediaBtn(btn, item, true);
+          } else {
+            btn.outerHTML = `<div class="flex items-center gap-1.5" id="mwrap-${item.itemid}"><span class="text-xs font-semibold text-emerald-600 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ครบแล้ว</span></div>`;
+          }
+        }
+      } else if (allClipsSent) {
         showToast(`ส่งแล้ว ${lessons.length} lessons`, 'emerald');
-        resetMediaBtn(btn, item);
+        resetMediaBtn(btn, item, resubmitMode && item.view_success === 'Y');
+      } else {
+        showToast(`ส่ง progress ได้ ${sentCount}/${lessons.length} คลิป`, 'red');
+        resetMediaBtn(btn, item, resubmitMode && item.view_success === 'Y');
       }
     } catch (err: any) {
       showToast('เกิดข้อผิดพลาด: ' + err.message, 'red');
@@ -304,12 +383,16 @@ function WorkContent() {
     }
   };
 
-  const resetMediaBtn = (btn: HTMLButtonElement | null, item: Item) => {
+  const resetMediaBtn = (btn: HTMLButtonElement | null, item: Item, asResubmit = false) => {
     if (!btn) return;
-    const isVDO = item?.lesson_type === 'Y';
-    btn.innerHTML = isVDO
-      ? `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Mark`
-      : `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> Mark`;
+    if (asResubmit) {
+      btn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> ส่งอีกรอบ`;
+    } else {
+      const isVDO = item?.lesson_type === 'Y';
+      btn.innerHTML = isVDO
+        ? `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Mark`
+        : `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> Mark`;
+    }
     btn.disabled = false;
   };
 
@@ -459,7 +542,7 @@ function WorkContent() {
           for (const lesson of lessons) {
             const isPDF     = lesson.lesson_type === 'F';
             const isVDO     = lesson.lesson_type === 'Y';
-            const duration  = isVDO ? (lesson.lenght_vdo || lesson.duration || 60) : (Math.floor(Math.random() * 46) + 45);
+            const duration  = isVDO ? parseVdoDurationSec(lesson) : (Math.floor(Math.random() * 46) + 45);
               await sleep(isPDF ? 1000 : 500);
 
             await fetch('/api/progress', {
@@ -563,7 +646,9 @@ function WorkContent() {
       }
 
       setCredit(res.new_balance);
-      setPaidItems(new Set(Array.from(paidItems).concat(res.paid_items.map(String))));
+      const newlyPaid = (res.paid_items ?? []).map(String);
+      setPaidItems(new Set(Array.from(paidItems).concat(newlyPaid)));
+      setEverPaidItems(prev => new Set([...Array.from(prev), ...newlyPaid, ...selectedItems.map(String)]));
       setShowPayModal(false);
       showToast(`✓ หัก ${res.charged} บาท · เครดิตเหลือ ${res.new_balance.toFixed(2)} บาท`, 'emerald');
 
@@ -578,6 +663,11 @@ function WorkContent() {
         }).then(r => r.json()).catch(() => null);
         if (refRes?.success && refRes.refund_amount > 0) {
           setCredit(refRes.new_balance);
+          setEverPaidItems(prev => {
+            const next = new Set(prev);
+            selectedItems.forEach(id => next.delete(String(id)));
+            return next;
+          });
           showToast(`↩ คืนเงิน ${refRes.refund_amount.toFixed(2)} บาท (tasks เสร็จแล้ว)`, 'emerald');
         }
       } else {
@@ -604,7 +694,26 @@ function WorkContent() {
     item.item_type === 'Q' &&
     Number(item.stu_score ?? 0) < Number(item.item_score ?? 10);
 
+  const isResubmittableMedia = (item: Item) =>
+    resubmitMode &&
+    item.item_type === 'M' &&
+    item.view_success === 'Y';
+
   const getItemActionHTML = (item: Item) => {
+    if (isResubmittableMedia(item)) {
+      return (
+        <button
+          id={`mbtn-${item.itemid}`}
+          onClick={() => markMedia(item)}
+          className="text-xs font-bold px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white active:scale-95 transition-all flex items-center gap-1"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          ส่งอีกรอบ
+        </button>
+      );
+    }
     if (item.view_success === 'Y' && !isResubmittableQuiz(item)) {
       return (
         <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">

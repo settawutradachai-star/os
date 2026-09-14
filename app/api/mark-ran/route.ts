@@ -8,6 +8,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (!item_ids || item_ids.length === 0) return;
     await pool.query(
       `UPDATE paid_tasks SET ran_at = NOW()
        WHERE student_id = $1
