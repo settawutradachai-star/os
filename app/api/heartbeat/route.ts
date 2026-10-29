@@ -86,7 +86,7 @@ async function bootstrapEedSession(): Promise<{ cookie: string; xsrf: string | n
     pairs = pairs.concat(parseSetCookies(root.headers).map(cookiePair).filter(Boolean));
   }
 
-  const cookie = Array.from(new Set(pairs)).join('; ');
+  const cookie = [...new Set(pairs)].join('; ');
   const xsrf = getCookie(cookie, 'XSRF-TOKEN');
   return { cookie, xsrf };
 }

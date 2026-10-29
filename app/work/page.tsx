@@ -449,7 +449,7 @@ function WorkContent() {
             btn.innerHTML = isPDF ? '📄 กำลังส่งสถานะคำบรรยาย...' : '🎬 กำลังตรวจสอบการดูวิดีโอ...';
           }
 
-          const lessonForHeartbeat = { ...lesson, itemid: lesson.itemid ?? item.itemid };
+          const lessonForHeartbeat: Record<string, any> = { ...lesson, itemid: lesson.itemid ?? item.itemid };
           console.log('[media] processing lesson', {
             lessonid: lessonForHeartbeat.lessonid,
             itemid: lessonForHeartbeat.itemid,
@@ -748,7 +748,7 @@ function WorkContent() {
       if (isVDO || isPDF) {
         setAutoStatus(`${isPDF ? '📄' : '🎬'} ${item.title} — ${isPDF ? 'กำลังส่งคำบรรยาย' : 'กำลังตรวจสอบวิดีโอ'} ${lesson.lessonid}`);
 
-        const lessonForHeartbeat = { ...lesson, itemid: lesson.itemid ?? item.itemid };
+        const lessonForHeartbeat: Record<string, any> = { ...lesson, itemid: lesson.itemid ?? item.itemid };
         console.log('[media] processing lesson', {
           lessonid: lessonForHeartbeat.lessonid,
           itemid: lessonForHeartbeat.itemid,
