@@ -287,9 +287,128 @@ function WorkContent() {
     return { totalScore, maxScore, doneTasks, totalTasks, chapters: chapters.length };
   };
 
+  // ── Video heartbeat ────────────────────────────────────────────────────────
+  // วิดีโอจะต้องได้ percent === 100 ก่อนจึงไป lesson ถัดไป
+  const runVideoHeartbeat = async (
+    lesson: Record<string, any>,
+    tok: string,
+    onProgress?: (percent: number, viewTime: number, fullTime: number) => void,
+  ): Promise<Record<string, any>> => {
+    const lessonId = lesson.lessonid;
+    const itemId = lesson.itemid;
+    const recId = Number(recid);
+
+    if (lessonId == null || itemId == null || !recId) {
+      throw new Error(`ข้อมูล heartbeat ไม่ครบ: lessonid=${lessonId}, itemid=${itemId}, recid=${recId}`);
+    }
+
+    let last: Record<string, any> = {};
+    let attempts = 0;
+    let rateLimitRetries = 0;
+    let lastPercent = -1;
+    let samePercentCount = 0;
+    const MAX_ATTEMPTS = 180;
+
+    // สำคัญ: item_complete === 'Y' ไม่ได้แปลว่า percent === 100 เสมอไป
+    // จาก response จริงของ e-ED บางครั้งได้ เช่น percent=66 + item_complete='Y'
+    // ดังนั้นจะปลดล็อก lesson ถัดไปเฉพาะเมื่อ percent >= 100 เท่านั้น
+    while (attempts < MAX_ATTEMPTS) {
+      attempts++;
+
+      console.log('[heartbeat] request', {
+        lessonid: lessonId, itemid: String(itemId), recid: recId,
+        lesson_type: String(lesson.lesson_type || 'Y'),
+      });
+      const res = await fetch('/api/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: tok,
+          itemid: String(itemId),
+          lesson_type: String(lesson.lesson_type || 'Y'),
+          lessonid: lessonId,
+          recid: recId,
+        }),
+      }).then(async r => {
+        const data = await r.json().catch(() => ({}));
+
+        if (r.status === 429) {
+          const retryAfter = Number(r.headers.get('retry-after') || data?.retry_after || 0);
+          const waitMs = retryAfter > 0
+            ? Math.min(Math.max(retryAfter * 1000, 5000), 60000)
+            : Math.min(15000 * Math.max(1, rateLimitRetries + 1), 60000);
+          console.warn('[heartbeat] rate limited; backoff', waitMs, 'ms', {
+            lessonid: lessonId, itemid: itemId, recid: recId,
+          });
+          await sleep(waitMs);
+          return { __retry: true } as Record<string, any>;
+        }
+
+        if (!r.ok && !data?.success) {
+          throw new Error(data?.error || `heartbeat HTTP ${r.status}`);
+        }
+        return data as Record<string, any>;
+      });
+
+      if (res.__retry) {
+        rateLimitRetries++;
+        // Avoid an unbounded retry loop if E-ED keeps rate-limiting this lesson.
+        if (rateLimitRetries >= 6) {
+          throw new Error(`E-ED จำกัดคำขอ heartbeat ซ้ำหลายครั้ง (HTTP 429) สำหรับ lesson ${lessonId}; รอสักครู่แล้วลองใหม่`);
+        }
+        attempts--;
+        continue;
+      }
+
+      last = res;
+
+      const percent = Number(res?.percent ?? 0);
+      const viewTime = Number(res?.view_time ?? 0);
+      const fullTime = Number(res?.full_time ?? 0);
+
+      if (percent === lastPercent) {
+        samePercentCount++;
+      } else {
+        lastPercent = percent;
+        samePercentCount = 0;
+      }
+
+      onProgress?.(percent, viewTime, fullTime);
+
+      console.log('[heartbeat]', {
+        lessonid: lessonId,
+        itemid: itemId,
+        recid: recId,
+        attempt: attempts,
+        percent,
+        view_time: viewTime,
+        full_time: fullTime,
+        item_complete: res?.item_complete,
+      });
+
+      // percent เป็นสถานะของ lesson ปัจจุบัน ส่วน item_complete อาจเป็นสถานะ
+      // รวมของ item ที่มีหลายคลิป จึงอาจยังเป็น N หลังคลิปแรกครบ 100% ได้
+      // จบเฉพาะ lesson ปัจจุบันเมื่อ percent ถึง 100 แล้วให้ลูปไป lesson ถัดไป
+      if (percent >= 100) {
+        return last;
+      }
+
+      // ป้องกันค้างถ้า upstream ไม่เพิ่ม percent อีกเลย
+      if (samePercentCount >= 24) {
+        throw new Error(
+          `heartbeat ไม่เพิ่ม progress ต่อเนื่อง (${percent}%, view_time=${viewTime}, full_time=${fullTime})`
+        );
+      }
+
+      await sleep(5000);
+    }
+
+    throw new Error(`heartbeat เกินจำนวนครั้งที่กำหนดโดยยังไม่ถึง 100% (ล่าสุด ${last?.percent ?? 0}%)`);
+  };
+
   // ── markMedia ─────────────────────────────────────────────────────────────
 
-  const markMedia = async (item: Item) => {
+  const markMedia = async (item: Item): Promise<boolean> => {
     const btn = document.getElementById(`mbtn-${item.itemid}`) as HTMLButtonElement;
     if (btn) { btn.innerHTML = '⏳...'; btn.disabled = true; }
 
@@ -302,11 +421,20 @@ function WorkContent() {
     try {
       const raw = await fetch(`/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`).then(r => r.json());
       const lessons = normalizeLessonsList(raw);
+      console.log('[media] lessons received', {
+        itemid: item.itemid,
+        count: lessons.length,
+        lessons: lessons.map(l => ({
+          lessonid: l.lessonid,
+          itemid: l.itemid ?? item.itemid,
+          lesson_type: l.lesson_type,
+        })),
+      });
 
       if (lessons.length === 0) {
         showToast('โหลด lessons ไม่สำเร็จ', 'red');
         resetMediaBtn(btn, item);
-        return;
+        return false;
       }
 
       let lastResult: Record<string, any> | null = null;
@@ -315,10 +443,49 @@ function WorkContent() {
       for (const lesson of lessons) {
         const isPDF = lesson.lesson_type === 'F';
         const isVDO = lesson.lesson_type === 'Y';
-        const duration = isVDO
-          ? parseVdoDurationSec(lesson)
+
+        if (isVDO || isPDF) {
+          if (btn) {
+            btn.innerHTML = isPDF ? '📄 กำลังส่งสถานะคำบรรยาย...' : '🎬 กำลังตรวจสอบการดูวิดีโอ...';
+          }
+
+          const lessonForHeartbeat = { ...lesson, itemid: lesson.itemid ?? item.itemid };
+          console.log('[media] processing lesson', {
+            lessonid: lessonForHeartbeat.lessonid,
+            itemid: lessonForHeartbeat.itemid,
+            lesson_type: lessonForHeartbeat.lesson_type,
+          });
+          const heartbeatResult = await runVideoHeartbeat(
+            lessonForHeartbeat,
+            tok,
+            (percent, viewTime, fullTime) => {
+              if (btn) {
+                const p = Math.min(100, Math.max(0, percent));
+                btn.innerHTML = isPDF ? `📄 ${p}%` : `🎬 ${p}% (${viewTime}/${fullTime || 0}s)`;
+              }
+              setAutoStatus(`${isPDF ? 'คำบรรยาย' : 'วิดีโอ'} ${lesson.lessonid}: ${Math.min(100, Math.max(0, percent))}%`);
+            },
+          );
+
+          lastResult = heartbeatResult;
+          lesson.__heartbeat_percent = Number(heartbeatResult?.percent ?? 0);
+          lesson.__heartbeat_complete = heartbeatResult?.item_complete;
+          sentCount++;
+
+          if (Number(heartbeatResult?.percent ?? 0) < 100) {
+            throw new Error(`${isPDF ? 'คำบรรยาย' : 'วิดีโอ'} lesson ${lesson.lessonid} ยังไม่ครบ 100%`);
+          }
+
+          // item_complete อาจเป็น N ระหว่างที่ยังมี lesson อื่นใน item เดียวกัน
+          // ใช้ percent ของ lesson ปัจจุบัน แล้วเดินหน้าตรวจ lesson ถัดไป
+          if (btn) btn.innerHTML = isPDF ? '✓ คำบรรยายส่งแล้ว' : '✓ วิดีโอครบ 100%';
+          continue;
+        }
+
+        const duration = isPDF
+          ? (Math.floor(Math.random() * 46) + 45)
           : (Math.floor(Math.random() * 46) + 45);
-        const waitSec  = isPDF ? Math.floor(Math.random() * 5) + 5 : 2;
+        const waitSec = isPDF ? Math.floor(Math.random() * 5) + 5 : 2;
 
         if (btn) {
           for (let s = waitSec; s > 0; s--) {
@@ -330,10 +497,8 @@ function WorkContent() {
           await sleep(waitSec * 1000);
         }
 
-        console.log(duration);
-
         const res = await fetch('/api/progress', {
-          method:  'POST',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             token: tok,
@@ -347,39 +512,46 @@ function WorkContent() {
             percent: 100,
           }),
         }).then(r => r.json());
+
         lastResult = res;
         sentCount++;
       }
 
       const allClipsSent = sentCount === lessons.length;
-      const isComplete = allClipsSent && (lastResult?.complete === 'Y' || lastResult?.item_complete === 'Y');
+      const allVideosComplete = lessons
+        .filter(l => l.lesson_type === 'Y')
+        .every(l => Number(l.__heartbeat_percent ?? 0) >= 100);
+      const hasVideo = lessons.some(l => l.lesson_type === 'Y');
+      const isComplete = allClipsSent && (!hasVideo || allVideosComplete);
 
-      if (allClipsSent) {
+      if (isComplete) {
         setChapters(prev => prev.map(ch => ({
           ...ch,
           child: (ch.child || []).map(i => i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i),
         })));
-      }
 
-      if (isComplete) {
-        showToast(`✓ Mark ครบ ${lessons.length} lesson แล้ว!`, 'emerald');
+        showToast(`✓ ${item.title} ครบแล้ว`, 'emerald');
         if (btn) {
           if (resubmitMode && item.view_success === 'Y') {
             resetMediaBtn(btn, item, true);
           } else {
-            btn.outerHTML = `<div class="flex items-center gap-1.5" id="mwrap-${item.itemid}"><span class="text-xs font-semibold text-emerald-600 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>ครบแล้ว</span></div>`;
+            btn.outerHTML = `<div class="flex items-center gap-1.5" id="mwrap-${item.itemid}"><span class="text-xs font-semibold text-emerald-600 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path class="w-3 h-3" d="M5 13l4 4L19 7"/></svg>ครบแล้ว</span></div>`;
           }
         }
-      } else if (allClipsSent) {
-        showToast(`ส่งแล้ว ${lessons.length} lessons`, 'emerald');
-        resetMediaBtn(btn, item, resubmitMode && item.view_success === 'Y');
+        return true;
+      }
+
+      if (allClipsSent) {
+        showToast(`ส่งแล้ว ${lessons.length} lessons แต่ยังไม่ครบเงื่อนไข`, 'red');
       } else {
         showToast(`ส่ง progress ได้ ${sentCount}/${lessons.length} คลิป`, 'red');
-        resetMediaBtn(btn, item, resubmitMode && item.view_success === 'Y');
       }
+      resetMediaBtn(btn, item, resubmitMode && item.view_success === 'Y');
+      return false;
     } catch (err: any) {
       showToast('เกิดข้อผิดพลาด: ' + err.message, 'red');
       resetMediaBtn(btn, item);
+      return false;
     }
   };
 
@@ -398,7 +570,7 @@ function WorkContent() {
 
   // ── doQuiz ────────────────────────────────────────────────────────────────
 
-  const doQuiz = async (item: Item) => {
+  const doQuiz = async (item: Item): Promise<boolean> => {
     const btn = document.getElementById(`qbtn-${item.itemid}`) as HTMLButtonElement;
     if (btn) { btn.innerHTML = '⏳...'; btn.disabled = true; }
 
@@ -425,7 +597,7 @@ function WorkContent() {
       if (result.skipped) {
         console.warn('[quiz] skipped for item', item.itemid);
         resetQuizBtn(btn);
-        return;
+        return false;
       }
 
       const score    = result.score ?? result.total_score ?? '?';
@@ -464,9 +636,11 @@ function WorkContent() {
         ...ch,
         child: (ch.child || []).map(i => i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i),
       })));
+      return true;
     } catch (err: any) {
       showToast('เกิดข้อผิดพลาด: ' + err.message, 'red');
       resetQuizBtn(btn);
+      return false;
     }
   };
 
@@ -479,124 +653,246 @@ function WorkContent() {
   // ── runSingleItem (for paid items button) ─────────────────────────────────
 
   const runSingleItem = async (item: Item) => {
-    const studentId = localStorage.getItem('id_code');
-    if (item.item_type === 'M') {
-      await markMedia(item);
-    } else if (item.item_type === 'Q') {
-      await doQuiz(item);
-      await sleep(2000);
+    const blocker = getSequenceBlocker([item.itemid], chapters);
+    if (blocker) {
+      showToast(`ต้องทำ “${blocker.title}” ให้เสร็จก่อน`, 'red');
+      return;
     }
+
+    const studentId = localStorage.getItem('id_code');
+    let success = false;
+
+    try {
+      if (item.item_type === 'M') {
+        success = await markMedia(item);
+      } else if (item.item_type === 'Q') {
+        success = await doQuiz(item);
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'เกิดข้อผิดพลาด', 'red');
+    }
+
+    if (!success) return;
+
     await fetch('/api/mark-ran', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ student_id: studentId, course_id: parseInt(courseId), item_ids: [item.itemid] }),
+    }).catch(() => {});
+
+    setPaidItems(prev => {
+      const next = new Set(prev);
+      next.delete(String(item.itemid));
+      return next;
     });
-    setPaidItems(prev => { const next = new Set(prev); next.delete(String(item.itemid)); return next; });
   };
 
-  // ── doAll ─────────────────────────────────────────────────────────────────
+  // ── Sequential course flow ────────────────────────────────────────────────
+  // ทำงานตามลำดับที่ e-ED แสดง: ก่อนเรียน -> วิดีโอ/เนื้อหา -> หลังเรียน
+  // และต้องทำบทก่อนหน้าให้เสร็จก่อนจึงจะเริ่มบทถัดไป
 
-  const doAll = async (selectedIds?: (string | number)[] | null, chaptersData?: Chapter[]): Promise<number> => {
+  const flattenOrderedItems = (src: Chapter[]): Item[] =>
+    src.flatMap(ch => Array.isArray(ch.child) ? ch.child : []);
+
+  const getSequenceBlocker = (
+    selectedIds: (string | number)[],
+    src: Chapter[],
+  ): Item | null => {
+    const selected = new Set(selectedIds.map(String));
+    const ordered = flattenOrderedItems(src);
+
+    for (let index = 0; index < ordered.length; index++) {
+      const item = ordered[index];
+      if (!selected.has(String(item.itemid))) continue;
+
+      // ถ้า item ก่อนหน้าถูกเลือกด้วย ให้ระบบทำให้ตามลำดับเองได้
+      // แต่ถ้าไม่ได้เลือกและยังไม่เสร็จ ต้องหยุดเพื่อไม่ให้ข้ามขั้นตอน
+      for (let i = 0; i < index; i++) {
+        const previous = ordered[i];
+        if (isItemDone(previous)) continue;
+        if (selected.has(String(previous.itemid))) continue;
+        return previous;
+      }
+    }
+    return null;
+  };
+
+  const runMediaSequential = async (item: Item, tok: string): Promise<boolean> => {
+    const raw = await fetch(
+      `/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`
+    ).then(async r => {
+      const data = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(data?.error || `โหลด lessons ไม่สำเร็จ (${r.status})`);
+      return data;
+    });
+
+    const lessons = normalizeLessonsList(raw);
+    console.log('[media] lessons received', {
+      itemid: item.itemid,
+      count: lessons.length,
+      lessons: lessons.map(l => ({
+        lessonid: l.lessonid,
+        itemid: l.itemid ?? item.itemid,
+        lesson_type: l.lesson_type,
+      })),
+    });
+    if (lessons.length === 0) throw new Error(`ไม่พบ lesson ของ ${item.title}`);
+
+    let lastResult: Record<string, any> = {};
+    let allComplete = true;
+
+    for (const lesson of lessons) {
+      const isVDO = lesson.lesson_type === 'Y';
+      const isPDF = lesson.lesson_type === 'F';
+
+      if (isVDO || isPDF) {
+        setAutoStatus(`${isPDF ? '📄' : '🎬'} ${item.title} — ${isPDF ? 'กำลังส่งคำบรรยาย' : 'กำลังตรวจสอบวิดีโอ'} ${lesson.lessonid}`);
+
+        const lessonForHeartbeat = { ...lesson, itemid: lesson.itemid ?? item.itemid };
+        console.log('[media] processing lesson', {
+          lessonid: lessonForHeartbeat.lessonid,
+          itemid: lessonForHeartbeat.itemid,
+          lesson_type: lessonForHeartbeat.lesson_type,
+        });
+        const heartbeatResult = await runVideoHeartbeat(
+          lessonForHeartbeat,
+          tok,
+          (percent, viewTime, fullTime) => {
+            const p = Math.min(100, Math.max(0, percent));
+            setAutoStatus(`${isPDF ? '📄' : '🎬'} ${item.title} — ${isPDF ? 'คำบรรยาย' : 'วิดีโอ'} ${p}%${isPDF ? '' : ` (${viewTime}/${fullTime || 0}s)`}`);
+          },
+        );
+
+        lastResult = heartbeatResult;
+        const lessonComplete = Number(heartbeatResult?.percent ?? 0) >= 100;
+
+        if (!lessonComplete) {
+          allComplete = false;
+          throw new Error(`${isPDF ? 'คำบรรยาย' : 'วิดีโอ'} lesson ${lesson.lessonid} ยังไม่ครบ 100%`);
+        }
+
+        // item_complete เป็นสถานะระดับ item ได้ จึงไม่ใช้ตัดสิน lesson ปัจจุบัน
+        continue;
+      }
+
+      // Non-video content still uses the normal e-ED progress endpoint.
+      const duration = isPDF ? 60 : 60;
+      const res = await fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: tok,
+          recid: Number(recid),
+          student_id: localStorage.getItem('id_code'),
+          itemid: lesson.itemid ?? item.itemid,
+          lessonid: lesson.lessonid,
+          lesson_type: lesson.lesson_type,
+          item_type: 'M',
+          courseid: Number(courseId),
+          full_time: duration,
+          view_time: duration,
+          percent: 100,
+        }),
+      }).then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.error || `ส่ง progress ไม่สำเร็จ (${r.status})`);
+        return data;
+      });
+
+      lastResult = res;
+      if (res?.complete === 'N' || res?.item_complete === 'N') allComplete = false;
+    }
+
+    // สำหรับวิดีโอ ใช้ผล heartbeat เป็นตัวตัดสินว่าดูครบจริง
+    if (lessons.some(l => l.lesson_type === 'Y')) {
+      const videoLessons = lessons.filter(l => l.lesson_type === 'Y');
+      if (videoLessons.length > 0 && !allComplete) return false;
+    }
+
+    setChapters(prev => prev.map(ch => ({
+      ...ch,
+      child: (ch.child || []).map(i =>
+        i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i
+      ),
+    })));
+
+    return true;
+  };
+
+  const doAll = async (
+    selectedIds?: (string | number)[] | null,
+    chaptersData?: Chapter[],
+  ): Promise<number> => {
     if (allRunning) return 0;
     setAllRunning(true);
 
-    const subjects    = JSON.parse(localStorage.getItem('subjects') || '[]');
-    const subjectData = subjects.find((sub: any) => sub.course_id == courseId);
-    const openid      = subjectData?.open_id;
-    const studentId   = localStorage.getItem('id_code');
-    const tok         = localStorage.getItem('token') ?? '';
-
     const src = chaptersData ?? chapters;
-    const allItems: Item[] = [];
-    src.forEach(ch => (ch.child || []).forEach(item => allItems.push(item)));
+    const tok = localStorage.getItem('token') ?? '';
+    const selected = selectedIds ? selectedIds.map(String) : null;
+    const ordered = flattenOrderedItems(src);
 
-    const idSet = selectedIds ? new Set(selectedIds.map(String)) : null;
-    const mediaItems = allItems.filter(i =>
-      i.item_type === 'M' && (!idSet || idSet.has(String(i.itemid))) && !isItemDone(i)
-    );
-    const quizzes = allItems.filter(i => {
-      if (i.item_type !== 'Q') return false;
-      if (idSet && !idSet.has(String(i.itemid))) return false;
-      if (resubmitMode) {
-        // Re-submit mode: include quizzes where score is not full
-        return Number(i.stu_score ?? 0) < Number(i.item_score ?? 10);
+    // ถ้าเลือก task กลาง/ท้ายโดยที่ task ก่อนหน้ายังไม่เสร็จ
+    // ให้หยุดทันที เพื่อไม่ให้ข้ามขั้นตอน
+    if (selected) {
+      const blocker = getSequenceBlocker(selectedIds!, src);
+      if (blocker) {
+        setAllRunning(false);
+        showToast(`ต้องทำ “${blocker.title}” ให้เสร็จก่อน`, 'red');
+        return 0;
       }
-      return !isItemDone(i);
-    });
-    const total      = mediaItems.length + quizzes.length;
-    let done = 0;
+    }
 
-    if (total === 0) {
-      setAutoStatus('✓ ทำครบหมดแล้ว');
+    const queue = ordered.filter(item =>
+      (!selected || selected.includes(String(item.itemid))) && !isItemDone(item)
+    );
+
+    if (queue.length === 0) {
+      setAutoStatus('✓ ทำตามลำดับครบแล้ว');
       setAllRunning(false);
       return 0;
     }
 
-    for (const item of mediaItems) {
-      const emoji = item.lesson_type === 'Y' ? '🎬' : '📄';
-      setAutoStatus(`${emoji} ${item.title}`);
-      try {
-        const lessons = await fetch(`/api/lessons?itemid=${item.itemid}&recid=${recid}&token=${encodeURIComponent(tok)}`).then(r => r.json());
+    let done = 0;
+    const completedIds = new Set(ordered.filter(isItemDone).map(i => String(i.itemid)));
+    setAutoProgress({ done: 0, total: queue.length });
 
-        if (Array.isArray(lessons) && lessons.length > 0) {
-          for (const lesson of lessons) {
-            const isPDF     = lesson.lesson_type === 'F';
-            const isVDO     = lesson.lesson_type === 'Y';
-            const duration  = isVDO ? parseVdoDurationSec(lesson) : (Math.floor(Math.random() * 46) + 45);
-              await sleep(isPDF ? 1000 : 500);
-
-            await fetch('/api/progress', {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token: tok,
-                recid: Number(recid), openid, student_id: studentId,
-                itemid: lesson.itemid, lessonid: lesson.lessonid,
-                lesson_type: lesson.lesson_type, item_type: 'M',
-                courseid: Number(courseId), full_time: duration, view_time: duration, percent: 100,
-              }),
-            }).then(r => r.json());
-            await sleep(300);
+    try {
+      for (const item of queue) {
+        // ตรวจ prerequisite จากสถานะในรอบนี้ด้วย ไม่ใช้ React state ที่ยังอัปเดตไม่ทัน
+        const currentIndex = ordered.findIndex(i => String(i.itemid) === String(item.itemid));
+        if (currentIndex > 0) {
+          const blocker = ordered.slice(0, currentIndex).find(i => !completedIds.has(String(i.itemid)));
+          if (blocker) {
+            throw new Error(`ต้องทำ “${blocker.title}” ให้เสร็จก่อน`);
           }
-        } else {
-          // fallback: no lessons, send item directly
-          const fallbackDur = Math.floor(Math.random() * 46) + 45;
-          await sleep(1000);
-          await fetch('/api/progress', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              token: tok,
-              recid: Number(recid), openid, student_id: studentId,
-              itemid: item.itemid, lessonid: item.lessonid || item.itemid,
-              lesson_type: item.lesson_type, item_type: 'M',
-              courseid: Number(courseId), full_time: fallbackDur, view_time: fallbackDur, percent: 100,
-            }),
-          }).then(r => r.json());
         }
 
-        setChapters(prev => prev.map(ch => ({
-          ...ch,
-          child: (ch.child || []).map(i => i.itemid === item.itemid ? { ...i, view_success: 'Y' } : i),
-        })));
-      } catch (e) {}
-      done++;
-      setAutoProgress({ done, total });
-      await sleep(300);
-    }
+        setAutoStatus(`${item.item_type === 'Q' ? '📝' : item.lesson_type === 'Y' ? '🎬' : '📄'} ${item.title}`);
 
-    for (const item of quizzes) {
-      setAutoStatus(`📝 Quiz: ${item.title}`);
-      try { await doQuiz(item); } catch (e) {}
-      done++;
-      setAutoProgress({ done, total });
-      await sleep(400);
-    }
+        if (item.item_type === 'M') {
+          const ok = await runMediaSequential(item, tok);
+          if (!ok) throw new Error(`เนื้อหา “${item.title}” ยังไม่เสร็จ`);
+        } else {
+          const ok = await doQuiz(item);
+          if (!ok) throw new Error(`แบบทดสอบ “${item.title}” ยังไม่เสร็จ`);
+        }
 
-    setAutoStatus('✓ เสร็จหมดแล้ว! รีเฟรชเพื่อดูคะแนนล่าสุด');
-    setAllRunning(false);
-    showToast('✓ Auto เสร็จทุกอย่างแล้ว!', 'emerald');
-    return done;
+        completedIds.add(String(item.itemid));
+        done++;
+        setAutoProgress({ done, total: queue.length });
+        await sleep(300);
+      }
+
+      setAutoStatus(`✓ ทำตามลำดับเสร็จ ${done}/${queue.length} งาน`);
+      showToast(`✓ ทำตามขั้นตอนครบ ${done} งาน`, 'emerald');
+      return done;
+    } catch (err: any) {
+      setAutoStatus(`หยุด: ${err?.message || 'เกิดข้อผิดพลาด'}`);
+      showToast(err?.message || 'เกิดข้อผิดพลาด', 'red');
+      return done === 0 ? -1 : done;
+    } finally {
+      setAllRunning(false);
+    }
   };
 
   // ── Payment ───────────────────────────────────────────────────────────────
@@ -615,7 +911,17 @@ function WorkContent() {
 
   const showPayModalFn = () => {
     const selected = getSelectedItemIds();
-    if (selected.length === 0) { showToast('เลือก task ก่อนอย่างน้อย 1 อย่าง', 'red'); return; }
+    if (selected.length === 0) {
+      showToast('เลือก task ก่อนอย่างน้อย 1 อย่าง', 'red');
+      return;
+    }
+
+    const blocker = getSequenceBlocker(selected, chapters);
+    if (blocker) {
+      showToast(`ต้องเลือก/ทำ “${blocker.title}” ก่อน จึงจะข้ามไปงานที่เลือกได้`, 'red');
+      return;
+    }
+
     setSelectedItems(selected);
     setShowPayModal(true);
   };
@@ -670,12 +976,14 @@ function WorkContent() {
           });
           showToast(`↩ คืนเงิน ${refRes.refund_amount.toFixed(2)} บาท (tasks เสร็จแล้ว)`, 'emerald');
         }
-      } else {
+      } else if (processedCount > 0) {
         await fetch('/api/mark-ran', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ student_id: studentId, course_id: parseInt(courseId), item_ids: selectedItems }),
         });
+      } else {
+        showToast('งานยังไม่สำเร็จ กรุณาตรวจสอบสถานะแล้วลองทำต่อ', 'red');
       }
       setPaidItems(prev => {
         const next = new Set(prev);
@@ -725,6 +1033,15 @@ function WorkContent() {
       );
     }
     if (paidItems.has(String(item.itemid))) {
+      const blocker = getSequenceBlocker([item.itemid], chapters);
+      if (blocker) {
+        return (
+          <span className="text-xs font-semibold text-slate-400 flex items-center gap-1" title={`ต้องทำ ${blocker.title} ก่อน`}>
+            🔒 รอขั้นตอนก่อนหน้า
+          </span>
+        );
+      }
+
       return (
         <button
           onClick={() => runSingleItem(item)}
@@ -749,7 +1066,8 @@ function WorkContent() {
     const isLocked  = item.can_view === 'N';
     const isVideo   = item.lesson_type === 'Y';
     const isPDF     = item.lesson_type === 'F';
-    const videoDone = isVideo && item.view_success === 'Y';
+    const itemDone = item.view_success === 'Y';
+    const videoDone = isVideo && itemDone;
 
     let icon = '';
     if (item.lesson_type === 'Pre' || item.lesson_type === 'Post') {
@@ -777,7 +1095,7 @@ function WorkContent() {
       <li key={item.itemid} className={`px-5 py-3 flex items-center justify-between gap-3 ${isLocked ? 'opacity-50' : ''}`}>
         <div className="flex items-start gap-2.5 min-w-0">
           <span
-            className={`mt-0.5 flex-shrink-0 ${videoDone ? 'text-emerald-500' : isVideo ? 'text-indigo-500' : isPDF ? 'text-orange-500' : 'text-slate-400'}`}
+            className={`mt-0.5 flex-shrink-0 ${itemDone ? 'text-emerald-500' : isVideo ? 'text-indigo-500' : isPDF ? 'text-indigo-500' : 'text-slate-400'}`}
             dangerouslySetInnerHTML={{ __html: icon }}
           />
           <div className="min-w-0">

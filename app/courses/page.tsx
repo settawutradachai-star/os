@@ -35,7 +35,7 @@ interface CoursePreview {
   sub: Subject;
   recid: string;
   items: Item[];      // all undone items
-  newItems: Item[];   // items not yet in paid_tasks
+  newItems: Item[];   // items never charged before
   paidItemIds: string[];
 }
 
@@ -176,11 +176,57 @@ export default function CoursesPage() {
       item.item_score > 0 &&
       item.stu_score >= item.item_score);
 
+  const [isChangingTerm, setIsChangingTerm] = useState(false);
+  const [termError, setTermError] = useState('');
+
+  const changeAcademicTerm = async (nextYear: string, nextTerm: string) => {
+    if (!id_code || !nextYear || !nextTerm || (nextYear === year && nextTerm === term)) return;
+    if (isRunning) return;
+
+    setIsChangingTerm(true);
+    setTermError('');
+    try {
+      const token = localStorage.getItem('token') ?? '';
+      const response = await fetch(
+        `/api/courses?year=${encodeURIComponent(nextYear)}&term=${encodeURIComponent(nextTerm)}&id_code=${encodeURIComponent(id_code)}&token=${encodeURIComponent(token)}`
+      );
+      const data = await response.json();
+      if (!response.ok || data.error || !Array.isArray(data.subjects)) {
+        throw new Error(data.message || data.error || 'ไม่สามารถโหลดรายวิชาของเทอมนี้ได้');
+      }
+
+      localStorage.setItem('year', nextYear);
+      localStorage.setItem('term', nextTerm);
+      localStorage.setItem('subjects', JSON.stringify(data.subjects));
+      if (data.student?.full_name) {
+        localStorage.setItem('full_name', data.student.full_name);
+        setFull_name(data.student.full_name);
+      }
+      if (data.student?.id_class) {
+        localStorage.setItem('id_class', data.student.id_class);
+        setId_class(data.student.id_class);
+      }
+      setYear(nextYear);
+      setTerm(nextTerm);
+      setSubjects(data.subjects);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    } catch (error: any) {
+      setTermError(error?.message || 'เกิดข้อผิดพลาดในการเปลี่ยนเทอม');
+    } finally {
+      setIsChangingTerm(false);
+    }
+  };
+
   const loadNavCredit = async (student_id: string) => {
     try {
       const res = await fetch('/api/credit', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '',
+        },
+        credentials: 'include',
         body:    JSON.stringify({ student_id }),
       }).then(r => r.json());
       setCreditBalance(res.balance ?? 0);
@@ -264,11 +310,12 @@ export default function CoursesPage() {
 
         pricePerTask = creditRes.price_per_task ?? pricePerTask;
         const paidItemIds: string[] = (creditRes.paid_items ?? []).map(String);
+        const everPaidItemIds = new Set<string>((creditRes.ever_paid_items ?? paidItemIds).map(String));
 
         const chapters: Chapter[] = Array.isArray(chaptersRaw) ? chaptersRaw : [];
         const allItems = chapters.flatMap(ch => ch.child || []);
         const items    = allItems.filter(i => !isItemDone(i));
-        const newItems = items.filter(i => !paidItemIds.includes(String(i.itemid)));
+        const newItems = items.filter(i => !everPaidItemIds.has(String(i.itemid))); 
 
         courses.push({ sub, recid, items, newItems, paidItemIds });
       } catch {}
@@ -457,10 +504,11 @@ export default function CoursesPage() {
         ]);
 
         const paidItemIds: string[] = (creditRes.paid_items ?? []).map(String);
+        const everPaidItemIds = new Set<string>((creditRes.ever_paid_items ?? paidItemIds).map(String));
         const chapters: Chapter[] = Array.isArray(chaptersRaw) ? chaptersRaw : [];
         const allItems = chapters.flatMap(ch => ch.child || []);
         const items    = allItems.filter(i => i.item_type === 'M' || i.item_type === 'Q');
-        const newItems = items.filter(i => !paidItemIds.includes(String(i.itemid)));
+        const newItems = items.filter(i => !everPaidItemIds.has(String(i.itemid))); 
 
         courses.push({ sub, recid, items, newItems, paidItemIds });
       } catch {}
@@ -697,17 +745,57 @@ export default function CoursesPage() {
               {full_name || id_code} · {id_class || ''} · ปี {year} เทอม {term}
             </p>
           </div>
-          {!isRunning && (
-            <button
-              onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); }}
-              className={`text-xs font-semibold px-3 py-2 rounded-xl transition flex-shrink-0 ${
-                selectMode ? 'bg-slate-200 text-slate-700 hover:bg-slate-300' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
-              }`}
-            >
-              {selectMode ? 'ยกเลิก' : 'เลือกวิชา'}
-            </button>
-          )}
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <label className="sr-only" htmlFor="academic-year">ปีการศึกษา</label>
+              <select
+                id="academic-year"
+                aria-label="ปีการศึกษา"
+                value={year ?? ''}
+                disabled={isChangingTerm || isRunning}
+                onChange={e => changeAcademicTerm(e.target.value, term ?? '1')}
+                className="text-xs font-semibold px-2.5 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 disabled:opacity-50"
+              >
+                {[String(Number(year || 2569) + 1), String(year || 2569), String(Number(year || 2569) - 1), String(Number(year || 2569) - 2)].filter((v, i, a) => a.indexOf(v) === i).map(y => (
+                  <option key={y} value={y}>ปี {y}</option>
+                ))}
+              </select>
+              <label className="sr-only" htmlFor="academic-term">ภาคเรียน</label>
+              <select
+                id="academic-term"
+                aria-label="ภาคเรียน"
+                value={term ?? ''}
+                disabled={isChangingTerm || isRunning}
+                onChange={e => changeAcademicTerm(year ?? '2569', e.target.value)}
+                className="text-xs font-semibold px-2.5 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 disabled:opacity-50"
+              >
+                <option value="1">เทอม 1</option>
+                <option value="2">เทอม 2</option>
+              </select>
+            </div>
+            {!isRunning && (
+              <button
+                onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); }}
+                className={`text-xs font-semibold px-3 py-2 rounded-xl transition flex-shrink-0 ${
+                  selectMode ? 'bg-slate-200 text-slate-700 hover:bg-slate-300' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                }`}
+              >
+                {selectMode ? 'ยกเลิก' : 'เลือกวิชา'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {isChangingTerm && (
+          <div className="mb-4 rounded-xl bg-indigo-50 px-4 py-3 text-sm text-indigo-700" role="status">
+            กำลังโหลดรายวิชาของปี {year} เทอม {term}...
+          </div>
+        )}
+        {termError && (
+          <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+            {termError}
+          </div>
+        )}
 
         {/* Select-mode toolbar */}
         {selectMode && !isRunning && (

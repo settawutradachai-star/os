@@ -24,9 +24,10 @@ export async function POST(req: Request) {
     );
     const pricePerTask = parseFloat((settingRows[0] as { value: string } | undefined)?.value ?? '1') || 1;
 
-    // Filter out items already paid but not yet run (prevent double charge)
+    // Never charge an item_id twice for the same student/course.
+    // ran_at records that an attempt was processed; it must not make the task billable again.
     const { rows: alreadyRows } = await client.query(
-      'SELECT itemid FROM paid_tasks WHERE student_id = $1 AND course_id = $2 AND itemid = ANY($3::int[]) AND ran_at IS NULL',
+      'SELECT itemid FROM paid_tasks WHERE student_id = $1 AND course_id = $2 AND itemid = ANY($3::int[])',
       [student_id, courseInt, intIds]
     );
     const alreadyPaidIds = alreadyRows.map((r: any) => Number(r.itemid));
